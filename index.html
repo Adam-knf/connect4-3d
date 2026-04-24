@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect Four 3D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 配色方案：极简工业 */
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #151520;
+      --bg-card: #1a1a28;
+      --fg-primary: #e8e8ec;
+      --fg-secondary: #8888a0;
+      --fg-muted: #55556a;
+      --accent-player: #3d9eff;
+      --accent-opponent: #ff6b4a;
+      --accent-win: #4ade80;
+      --accent-gold: #fbbf24;
+      --border: #2a2a3a;
+
+      /* 字体 */
+      --font-display: 'Space Mono', monospace;
+      --font-body: 'DM Sans', sans-serif;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--fg-primary);
+      overflow: hidden;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* WebGL不支持提示 */
+    .webgl-error {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--bg-card);
+      border: 1px solid var(--accent-opponent);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      color: var(--fg-primary);
+      font-family: var(--font-body);
+    }
+
+    .webgl-error h2 {
+      font-family: var(--font-display);
+      color: var(--accent-opponent);
+      margin-bottom: 16px;
+    }
+
+    .webgl-error p {
+      color: var(--fg-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="canvas-container"></div>
+    <!-- Phase 6 UI 容器 -->
+    <div id="menu-ui"></div>
+    <div id="game-ui"></div>
+    <div class="webgl-error" id="webgl-error">
+      <h2>WebGL Not Supported</h2>
+      <p>Your browser does not support WebGL.<br>Please use a modern browser like Chrome, Firefox, or Edge.</p>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

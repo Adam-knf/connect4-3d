@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D四子棋 - 视觉风格演示</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 配色方案：极简工业 */
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #151520;
+      --bg-card: #1a1a28;
+      --fg-primary: #e8e8ec;
+      --fg-secondary: #8888a0;
+      --fg-muted: #55556a;
+      --accent-player: #3d9eff;
+      --accent-opponent: #ff6b4a;
+      --accent-win: #4ade80;
+      --accent-gold: #fbbf24;
+      --border: #2a2a3a;
+      --glow-blue: rgba(61, 158, 255, 0.3);
+      --glow-red: rgba(255, 107, 74, 0.3);
+
+      /* 棋子颜色 */
+      --piece-black: #1a1a2e;
+      --piece-white: #f0f0f5;
+
+      /* 字体 */
+      --font-display: 'Space Mono', monospace;
+      --font-body: 'DM Sans', sans-serif;
+
+      /* 间距 */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 16px;
+      --space-lg: 24px;
+      --space-xl: 48px;
+
+      /* 圆角 */
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--fg-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* 页面标题 */
+    .page-header {
+      padding: var(--space-xl) var(--space-lg);
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    }
+
+    .page-header h1 {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      letter-spacing: 0.1em;
+      margin-bottom: var(--space-sm);
+    }
+
+    .page-header p {
+      color: var(--fg-secondary);
+      font-size: 0.9rem;
+    }
+
+    /* 主容器 */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: var(--space-lg);
+    }
+
+    /* 风格章节 */
+    .section {
+      margin-bottom: var(--space-xl);
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      color: var(--fg-secondary);
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-lg);
+      padding-bottom: var(--space-sm);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* 色板展示 */
+    .color-palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: var(--space-md);
+    }
+
+    .color-card {
+      background: var(--bg-card);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+      border: 1px solid var(--border);
+    }
+
+    .color-preview {
+      height: 60px;
+      border-radius: var(--radius-sm);
+      margin-bottom: var(--space-sm);
+    }
+
+    .color-name {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      color: var(--fg-secondary);
+    }
+
+    .color-value {
+      font-size: 0.7rem;
+      color: var(--fg-muted);
+    }
+
+    /* 棋子展示 */
+    .pieces-demo {
+      display: flex;
+      gap: var(--space-xl);
+      align-items: center;
+      justify-content: center;
+      padding: var(--space-xl);
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+    }
+
+    /* 圆柱棋子 - 俯视图 */
+    .piece-top-view {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      position: relative;
+      box-shadow:
+        inset -4px -4px 12px rgba(0,0,0,0.3),
+        inset 4px 4px 12px rgba(255,255,255,0.08),
+        0 6px 24px rgba(0,0,0,0.5);
+    }
+
+    /* 圆柱棋子 - 侧视图（模拟3D圆柱） */
+    .piece-side-view {
+      width: 80px;
+      height: 80px;
+      border-radius: 8px;  /* 圆角矩形模拟圆柱侧面 */
+      position: relative;
+      box-shadow:
+        inset -4px -4px 12px rgba(0,0,0,0.3),
+        inset 4px 4px 12px rgba(255,255,255,0.08),
+        0 6px 24px rgba(0,0,0,0.5);
+    }
+
+    /* 圆柱顶部边缘高光 */
+    .piece-side-view::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 8px;
+      border-radius: 8px 8px 0 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.2), transparent);
+    }
+
+    .piece-black-top {
+      background: linear-gradient(145deg, #252540, #0f0f1a);
+    }
+
+    .piece-black-top::after,
+    .piece-black-side::after {
+      content: '';
+      position: absolute;
+      top: 15%;
+      left: 20%;
+      width: 25%;
+      height: 15%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), transparent);
+      border-radius: 50%;
+    }
+
+    .piece-white-top {
+      background: linear-gradient(145deg, #ffffff, #d8d8e0);
+    }
+
+    .piece-white-top::after,
+    .piece-white-side::after {
+      content: '';
+      position: absolute;
+      top: 15%;
+      left: 20%;
+      width: 25%;
+      height: 15%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.7), transparent);
+      border-radius: 50%;
+    }
+
+    .piece-black-side {
+      background: linear-gradient(145deg, #252540, #0f0f1a);
+    }
+
+    .piece-white-side {
+      background: linear-gradient(145deg, #ffffff, #d8d8e0);
+    }
+
+    .piece-label {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      color: var(--fg-secondary);
+      text-align: center;
+      margin-top: var(--space-sm);
+    }
+
+    .piece-note {
+      font-size: 0.7rem;
+      color: var(--fg-muted);
+      text-align: center;
+      margin-top: var(--space-xs);
+    }
+
+    .piece-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .piece-views {
+      display: flex;
+      gap: var(--space-md);
+      align-items: flex-end;
+    }
+
+    .view-label {
+      font-size: 0.65rem;
+      color: var(--fg-muted);
+      text-align: center;
+      margin-top: var(--space-xs);
+    }
+
+    /* 主菜单 mockup */
+    .menu-mockup {
+      background: var(--bg-primary);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl);
+      border: 1px solid var(--border);
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .menu-logo {
+      font-family: var(--font-display);
+      font-size: 2.5rem;
+      letter-spacing: 0.15em;
+      margin-bottom: var(--space-xl);
+      color: var(--fg-primary);
+    }
+
+    .menu-subtitle {
+      font-size: 0.9rem;
+      color: var(--fg-secondary);
+      margin-bottom: var(--space-xl);
+    }
+
+    .menu-buttons {
+      display: flex;
+      gap: var(--space-md);
+    }
+
+    .btn {
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: var(--space-md) var(--space-lg);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--fg-primary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: var(--bg-secondary);
+      border-color: var(--accent-player);
+    }
+
+    .btn-primary {
+      background: var(--accent-player);
+      border-color: var(--accent-player);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #5aa8ff;
+      box-shadow: 0 4px 20px var(--glow-blue);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border-color: var(--fg-muted);
+    }
+
+    /* 难度选择 */
+    .difficulty-selector {
+      display: flex;
+      gap: var(--space-md);
+      margin-top: var(--space-lg);
+    }
+
+    .difficulty-option {
+      padding: var(--space-md) var(--space-lg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-card);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+
+    .difficulty-option:hover {
+      border-color: var(--accent-player);
+    }
+
+    .difficulty-option.selected {
+      border-color: var(--accent-player);
+      background: rgba(61, 158, 255, 0.1);
+    }
+
+    .difficulty-name {
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      color: var(--fg-primary);
+    }
+
+    .difficulty-desc {
+      font-size: 0.7rem;
+      color: var(--fg-muted);
+      margin-top: var(--space-xs);
+    }
+
+    /* HUD mockup */
+    .hud-mockup {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      padding: var(--space-lg);
+      display: grid;
+      grid-template-columns: 1fr 2fr 1fr;
+      gap: var(--space-lg);
+    }
+
+    .hud-panel {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+      border: 1px solid var(--border);
+    }
+
+    .hud-label {
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      color: var(--fg-muted);
+      letter-spacing: 0.1em;
+    }
+
+    .hud-value {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      color: var(--fg-primary);
+      margin-top: var(--space-xs);
+    }
+
+    .hud-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .turn-indicator {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      padding: var(--space-sm) var(--space-md);
+      border-radius: var(--radius-sm);
+      background: rgba(61, 158, 255, 0.2);
+      color: var(--accent-player);
+      border: 1px solid var(--accent-player);
+    }
+
+    .ai-thinking {
+      font-size: 0.8rem;
+      color: var(--fg-secondary);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+
+    /* 战绩展示 */
+    .stats-mockup {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      padding: var(--space-lg);
+    }
+
+    .stats-header {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      color: var(--fg-secondary);
+      margin-bottom: var(--space-md);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-md);
+    }
+
+    .stat-card {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+      border: 1px solid var(--border);
+    }
+
+    .stat-difficulty {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      color: var(--fg-muted);
+      letter-spacing: 0.1em;
+    }
+
+    .stat-values {
+      display: flex;
+      justify-content: space-between;
+      margin-top: var(--space-sm);
+    }
+
+    .stat-win {
+      color: var(--accent-win);
+      font-family: var(--font-display);
+      font-size: 1rem;
+    }
+
+    .stat-loss {
+      color: var(--accent-opponent);
+      font-family: var(--font-display);
+      font-size: 1rem;
+    }
+
+    .stat-rate {
+      color: var(--fg-primary);
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      text-align: center;
+      margin-top: var(--space-sm);
+    }
+
+    /* 特效展示 */
+    .effects-demo {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-lg);
+    }
+
+    .effect-card {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl);
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .effect-title {
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      color: var(--fg-secondary);
+      margin-bottom: var(--space-md);
+    }
+
+    .effect-preview {
+      height: 120px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: var(--space-md);
+    }
+
+    .win-effect {
+      background: radial-gradient(circle at center, rgba(74, 222, 128, 0.3), transparent);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+    }
+
+    .win-effect .effect-icon {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      color: var(--accent-win);
+    }
+
+    .lose-effect {
+      background: radial-gradient(circle at center, rgba(255, 107, 74, 0.3), transparent);
+      border: 1px solid rgba(255, 107, 74, 0.2);
+    }
+
+    .lose-effect .effect-icon {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      color: var(--accent-opponent);
+    }
+
+    .effect-desc {
+      font-size: 0.8rem;
+      color: var(--fg-muted);
+    }
+
+    /* 3D棋盘风格说明 */
+    .board-style {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl);
+      border: 1px solid var(--border);
+    }
+
+    .board-style-title {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      color: var(--fg-secondary);
+      margin-bottom: var(--space-lg);
+    }
+
+    .board-style-list {
+      list-style: none;
+    }
+
+    .board-style-item {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-md);
+      margin-bottom: var(--space-md);
+      padding: var(--space-md);
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+    }
+
+    .style-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+    }
+
+    .style-text {
+      flex: 1;
+    }
+
+    .style-name {
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      color: var(--fg-primary);
+    }
+
+    .style-desc {
+      font-size: 0.75rem;
+      color: var(--fg-muted);
+      margin-top: var(--space-xs);
+    }
+
+    /* 字体展示 */
+    .font-demo {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-lg);
+    }
+
+    .font-card {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      border: 1px solid var(--border);
+    }
+
+    .font-name {
+      font-size: 0.7rem;
+      color: var(--fg-muted);
+      margin-bottom: var(--space-md);
+    }
+
+    .font-sample {
+      font-size: 2rem;
+      margin-bottom: var(--space-md);
+    }
+
+    .font-display-sample {
+      font-family: var(--font-display);
+    }
+
+    .font-body-sample {
+      font-family: var(--font-body);
+    }
+
+    .font-usage {
+      font-size: 0.75rem;
+      color: var(--fg-secondary);
+    }
+
+    /* 动画效果 */
+    .hover-glow:hover {
+      box-shadow: 0 0 20px var(--glow-blue);
+    }
+
+    /* 标签页切换 */
+    .tabs {
+      display: flex;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-lg);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: var(--space-sm);
+    }
+
+    .tab {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      padding: var(--space-sm) var(--space-md);
+      color: var(--fg-muted);
+      cursor: pointer;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      transition: all 0.2s ease;
+    }
+
+    .tab:hover {
+      color: var(--fg-secondary);
+    }
+
+    .tab.active {
+      color: var(--accent-player);
+      border-bottom: 2px solid var(--accent-player);
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <h1>CONNECT FOUR 3D</h1>
+    <p>视觉风格指南 · 极简工业风格</p>
+  </header>
+
+  <main class="container">
+    <!-- 配色方案 -->
+    <section class="section">
+      <h2 class="section-title">01. 配色方案</h2>
+      <div class="color-palette">
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--bg-primary);"></div>
+          <div class="color-name">背景主色</div>
+          <div class="color-value">#0a0a0f</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--bg-secondary);"></div>
+          <div class="color-name">背景次色</div>
+          <div class="color-value">#151520</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--bg-card);"></div>
+          <div class="color-name">卡片背景</div>
+          <div class="color-value">#1a1a28</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--fg-primary);"></div>
+          <div class="color-name">文字主色</div>
+          <div class="color-value">#e8e8ec</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--accent-player);"></div>
+          <div class="color-name">玩家强调</div>
+          <div class="color-value">#3d9eff</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--accent-opponent);"></div>
+          <div class="color-name">对手强调</div>
+          <div class="color-value">#ff6b4a</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--accent-win);"></div>
+          <div class="color-name">胜利色</div>
+          <div class="color-value">#4ade80</div>
+        </div>
+        <div class="color-card">
+          <div class="color-preview" style="background: var(--accent-gold);"></div>
+          <div class="color-name">特效金</div>
+          <div class="color-value">#fbbf24</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 字体系统 -->
+    <section class="section">
+      <h2 class="section-title">02. 字体系统</h2>
+      <div class="font-demo">
+        <div class="font-card">
+          <div class="font-name">Display Font (标题/数值)</div>
+          <div class="font-sample font-display-sample">SPACE MONO</div>
+          <div class="font-usage">用于：游戏标题、HUD数值、难度标签、战绩数字</div>
+        </div>
+        <div class="font-card">
+          <div class="font-name">Body Font (正文/说明)</div>
+          <div class="font-sample font-body-sample">DM Sans</div>
+          <div class="font-usage">用于：按钮文字、说明文字、菜单选项、提示信息</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 棋子视觉 -->
+    <section class="section">
+      <h2 class="section-title">03. 棋子视觉 · 乐高式圆柱</h2>
+      <div class="pieces-demo">
+        <div class="piece-group">
+          <div class="piece-views">
+            <div>
+              <div class="piece-top-view piece-black-top"></div>
+              <div class="view-label">俯视图</div>
+            </div>
+            <div>
+              <div class="piece-side-view piece-black-side"></div>
+              <div class="view-label">侧视图</div>
+            </div>
+          </div>
+          <div class="piece-label">黑棋 · 玩家</div>
+          <div class="piece-note">圆柱形 · 塑料质感 · 直径=高度</div>
+        </div>
+        <div class="piece-group">
+          <div class="piece-views">
+            <div>
+              <div class="piece-top-view piece-white-top"></div>
+              <div class="view-label">俯视图</div>
+            </div>
+            <div>
+              <div class="piece-side-view piece-white-side"></div>
+              <div class="view-label">侧视图</div>
+            </div>
+          </div>
+          <div class="piece-label">白棋 · AI</div>
+          <div class="piece-note">圆柱形 · 塑料质感 · 直径=高度</div>
+        </div>
+      </div>
+      <div class="board-style" style="margin-top: var(--space-lg);">
+        <h3 class="board-style-title">材质规格</h3>
+        <ul class="board-style-list">
+          <li class="board-style-item">
+            <div class="style-icon">3D</div>
+            <div class="style-text">
+              <div class="style-name">圆柱形状</div>
+              <div class="style-desc">CylinderGeometry，直径=高度，稳定堆叠，物理感强</div>
+            </div>
+          </li>
+          <li class="board-style-item">
+            <div class="style-icon">✦</div>
+            <div class="style-text">
+              <div class="style-name">塑料材质</div>
+              <div class="style-desc">MeshStandardMaterial，metalness=0.0，roughness=0.4，光滑塑料表面</div>
+            </div>
+          </li>
+          <li class="board-style-item">
+            <div class="style-icon">⬡</div>
+            <div class="style-text">
+              <div class="style-name">棋盘网格</div>
+              <div class="style-desc">半透明线框显示格子边界，不遮挡棋子，淡灰色 #2a2a3a</div>
+            </div>
+          </li>
+          <li class="board-style-item">
+            <div class="style-icon">💨</div>
+            <div class="style-text">
+              <div class="style-name">堆叠特效（待实现）</div>
+              <div class="style-desc">棋子落下接触时，触发气体喷出粒子效果</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 主菜单 -->
+    <section class="section">
+      <h2 class="section-title">04. 主菜单 UI</h2>
+      <div class="menu-mockup">
+        <div class="menu-logo">CONNECT 4</div>
+        <div class="menu-subtitle">3D · 四子棋</div>
+        <div class="menu-buttons">
+          <button class="btn btn-primary">开始游戏</button>
+          <button class="btn btn-secondary">查看战绩</button>
+        </div>
+        <div class="difficulty-selector">
+          <div class="difficulty-option selected">
+            <div class="difficulty-name">简单</div>
+            <div class="difficulty-desc">适合新手</div>
+          </div>
+          <div class="difficulty-option">
+            <div class="difficulty-name">中等</div>
+            <div class="difficulty-desc">有挑战</div>
+          </div>
+          <div class="difficulty-option">
+            <div class="difficulty-name">困难</div>
+            <div class="difficulty-desc">高手挑战</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 游戏 HUD -->
+    <section class="section">
+      <h2 class="section-title">05. 游戏 HUD</h2>
+      <div class="hud-mockup">
+        <div class="hud-panel">
+          <div class="hud-label">回合</div>
+          <div class="hud-value">12</div>
+        </div>
+        <div class="hud-center">
+          <div class="turn-indicator">黑方回合</div>
+          <div class="ai-thinking">AI 思考中...</div>
+        </div>
+        <div class="hud-panel">
+          <div class="hud-label">用时</div>
+          <div class="hud-value">05:32</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 战绩面板 -->
+    <section class="section">
+      <h2 class="section-title">06. 战绩面板</h2>
+      <div class="stats-mockup">
+        <h3 class="stats-header">战绩统计</h3>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-difficulty">简单</div>
+            <div class="stat-values">
+              <span class="stat-win">5胜</span>
+              <span class="stat-loss">2负</span>
+            </div>
+            <div class="stat-rate">胜率 71%</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-difficulty">中等</div>
+            <div class="stat-values">
+              <span class="stat-win">3胜</span>
+              <span class="stat-loss">4负</span>
+            </div>
+            <div class="stat-rate">胜率 43%</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-difficulty">困难</div>
+            <div class="stat-values">
+              <span class="stat-win">1胜</span>
+              <span class="stat-loss">5负</span>
+            </div>
+            <div class="stat-rate">胜率 17%</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 胜负特效 -->
+    <section class="section">
+      <h2 class="section-title">07. 胜负特效</h2>
+      <div class="effects-demo">
+        <div class="effect-card">
+          <h3 class="effect-title">胜利特效</h3>
+          <div class="effect-preview win-effect">
+            <span class="effect-icon">胜利</span>
+          </div>
+          <div class="effect-desc">连线高亮（绿色发光）→ 棋盘旋转 → 金色粒子爆炸</div>
+        </div>
+        <div class="effect-card">
+          <h3 class="effect-title">失败特效</h3>
+          <div class="effect-preview lose-effect">
+            <span class="effect-icon">失败</span>
+          </div>
+          <div class="effect-desc">连线高亮（红色发光）→ 灰色粒子飘落 → 结果文字</div>
+        </div>
+      </div>
+      <div class="board-style" style="margin-top: var(--space-lg);">
+        <h3 class="board-style-title">特效规格</h3>
+        <ul class="board-style-list">
+          <li class="board-style-item">
+            <div class="style-icon">◈</div>
+            <div class="style-text">
+              <div class="style-name">连线高亮</div>
+              <div class="style-desc">获胜4子连线使用 emissive 发光材质，颜色随胜利/失败变化</div>
+            </div>
+          </li>
+          <li class="board-style-item">
+            <div class="style-icon">✧</div>
+            <div class="style-text">
+              <div class="style-name">粒子系统</div>
+              <div class="style-desc">胜利：金色粒子向外爆炸扩散；失败：灰色粒子向下飘落</div>
+            </div>
+          </li>
+          <li class="board-style-item">
+            <div class="style-icon">⟳</div>
+            <div class="style-text">
+              <div class="style-name">棋盘旋转</div>
+              <div class="style-desc">胜利时棋盘自动旋转360度展示连线，失败时不旋转</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
