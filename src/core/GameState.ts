@@ -103,10 +103,18 @@ export class GameState {
   }
 
   /**
-   * 获取完整状态数据
+   * 获取完整状态数据副本（用于读取）
    */
   getData(): GameStateData {
     return { ...this.data };
+  }
+
+  /**
+   * 获取状态数据引用（用于内部修改）
+   * 注意：仅供 GameController 内部使用
+   */
+  getDataRef(): GameStateData {
+    return this.data;
   }
 
   /**
@@ -351,7 +359,15 @@ export class GameState {
    */
   restart(): void {
     const oldState = this.data.currentState;
+    // 保存当前难度
+    const currentDifficulty = this.data.difficulty;
+    console.log(`[GameState.restart] Preserving difficulty: ${currentDifficulty}`);
+
     this.data = this.createInitialState();
+    // 恢复难度
+    this.data.difficulty = currentDifficulty;
+    console.log(`[GameState.restart] After restart, difficulty is: ${this.data.difficulty}`);
+
     this.notifyStateChange('MENU', oldState);
   }
 

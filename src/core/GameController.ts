@@ -127,11 +127,13 @@ export class GameController {
    * @returns 是否先手
    */
   prepareGame(difficulty: Difficulty, order: Order): boolean {
-    console.log(`[GameController] Preparing game: difficulty=${difficulty}, order=${order}`);
+    console.log(`[GameController.prepareGame] Input difficulty: ${difficulty}, current state difficulty: ${this.state.getDifficulty()}`);
 
-    // 设置难度（不触发SELECT_ORDER状态变化）
-    this.state.getData().difficulty = difficulty;
-    this.state.getData().currentState = 'SELECT_ORDER';
+    // 直接修改原始状态数据（不触发状态变化）
+    const stateData = this.state.getDataRef();
+    stateData.difficulty = difficulty;
+    stateData.currentState = 'SELECT_ORDER';
+    console.log(`[GameController.prepareGame] After setting, difficulty: ${this.state.getDifficulty()}`);
 
     // 更新AI难度
     this.ai.setDifficulty(difficulty);
@@ -569,8 +571,9 @@ export class GameController {
    * 重新开始游戏
    */
   restart(): void {
-    console.log('[GameController] Restarting game...');
+    console.log(`[GameController.restart] Before restart, difficulty: ${this.state.getDifficulty()}`);
     this.state.restart();
+    console.log(`[GameController.restart] After restart, difficulty: ${this.state.getDifficulty()}`);
 
     // 重新初始化棋盘
     this.board = new Board(this.state.getBoardHeight());

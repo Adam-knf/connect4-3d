@@ -21,7 +21,7 @@ export const BOARD_CONFIG: BoardConfig = {
   width: 5,          // 长宽 5x5
   height: 6,         // 默认高度 6层（可扩展至8）
   cellSize: 1,       // 格子平面尺寸（宽度/深度）
-  cellHeight: 0.5,     // 格子高度（层间距）← 新增，方便调整
+  cellHeight: 0.8,     // 格子高度（层间距）← 新增，方便调整
 };
 
 /**

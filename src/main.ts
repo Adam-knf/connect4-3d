@@ -230,7 +230,7 @@ class ConnectFour3D {
   restart(): void {
     if (!this.gameController) return;
 
-    console.log('[Game] Restarting...');
+    console.log('[Game] Restarting...',this.gameController.getDifficulty());
 
     // 先保存当前难度（restart会重置状态）
     const currentDifficulty = this.gameController.getDifficulty();
