@@ -77,11 +77,68 @@ export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type Order = 'FIRST' | 'SECOND' | 'RANDOM';
 
 /**
- * AI配置
+ * 分层评估配置
+ * v3.0 新增：Layer 3 潜在叉子检测
+ */
+export interface EvaluationLayerConfig {
+  /** Layer 0: 立即胜负检测 */
+  enableImmediateWin: boolean;
+  /** Layer 1: 基础威胁评估 */
+  enableBasicThreat: boolean;
+  /** EASY简化：只检测可立即下（readyEnds > 0） */
+  basicThreatOnlyImmediate: boolean;
+  /** Layer 2: 进阶威胁（双威胁+2连） */
+  enableAdvancedThreat: boolean;
+  /** Layer 3: 潜在叉子检测（v3.0新增） */
+  enablePotentialFork: boolean;
+  /** Layer 4: Minimax深度搜索 */
+  enableMinimaxSearch: boolean;
+}
+
+/**
+ * 难度配置（扩展版）
+ * v3.0 新增：潜在叉子检测 + 叉子分数倍率
+ */
+export interface DifficultyConfig {
+  /** 搜索深度 */
+  depth: number;
+  /** 失误率 */
+  mistakeRate: number;
+  /** 分层评估配置 */
+  layers: EvaluationLayerConfig;
+  /** 关键时刻不失误（WIN/BLOCK_WIN） */
+  criticalNoMistake: boolean;
+  /** 叉子分数倍率（HARD专用，可选） */
+  forkScoreMultiplier?: number;
+}
+
+/**
+ * AI配置（旧接口，过渡期保留）
+ * @deprecated 使用 DifficultyConfig 替代
  */
 export interface AIConfig {
   depth: number;       // 搜索深度
   mistakeRate: number; // 失误率 (0-1)
+}
+
+/**
+ * 四连记录（用于AI评估）
+ */
+export interface LineRecord {
+  /** 唯一ID */
+  id: number;
+  /** 4个位置坐标 */
+  positions: Position[];
+  /** 方向向量 */
+  direction: Vector3;
+  /** 黑棋数量 (0-4) */
+  blackCount: number;
+  /** 白棋数量 (0-4) */
+  whiteCount: number;
+  /** 开放端数量 (0-2) - 两端可延伸的位置数 */
+  openEnds: number;
+  /** 可立即下的开放端数量 (0-2) - 开放端底层已有棋子，可立即放置 */
+  readyEnds: number;
 }
 
 /**

@@ -133,6 +133,7 @@ export interface AnimationSpec {
 
 /**
  * 几何体配置（经典主题用）
+ * v1.2 修正：移除 metalness/roughness，统一使用顶层 material
  */
 export interface GeometryConfig {
   type: GeometryType;
@@ -141,8 +142,26 @@ export interface GeometryConfig {
   width?: number;     // box
   depth?: number;     // box
   color: number;      // 颜色
-  metalness: number;
-  roughness: number;
+  // metalness/roughness 移至顶层 PieceTheme.material
+}
+
+/**
+ * 材质物理属性配置（v1.1 新增）
+ * 用于 Three.js MeshStandardMaterial
+ * v1.2 统一：适用几何体+GLB模型
+ */
+export interface MaterialConfig {
+  metalness?: number;  // 金属度（经典0.0/机甲0.7）
+  roughness?: number;  // 粗糙度（经典0.4/猫咪0.6/机甲0.3）
+}
+
+/**
+ * 边缘光晕效果配置（v1.1 新增）
+ * 用于经典主题苹果风格的光晕效果
+ */
+export interface EmissiveGlowConfig {
+  color: number;      // 光晕颜色（经典白棋#ffffff/黑棋#3d3d42）
+  intensity: number;  // 光晕强度（0.15-0.3）
 }
 
 /**
@@ -158,7 +177,7 @@ export interface ModelConfig {
 }
 
 /**
- * 棋子主题配置
+ * 棋子主题配置（v1.1 扩展）
  * 支持几何体 + GLB模型两种方式
  */
 export interface PieceTheme {
@@ -171,12 +190,19 @@ export interface PieceTheme {
   // 休眠姿态（可选，姿态差异大的主题需要）
   // ADR-013：多模型文件（活跃/休眠分离）
   sleepModel?: ModelConfig;
+
+  // v1.1 新增：材质物理属性
+  material?: MaterialConfig;
+
+  // v1.1 新增：边缘光晕效果（经典主题苹果风格）
+  emissiveGlow?: EmissiveGlowConfig;
 }
 
 // ==================== 棋盘主题配置 ====================
 
 /**
  * 棋盘底座几何体配置（经典主题用）
+ * v1.1 扩展：支持苹果风格圆角设计
  */
 export interface BoardGeometryConfig {
   type: 'box' | 'platform';   // box: 简约底座, platform: 平台
@@ -184,6 +210,7 @@ export interface BoardGeometryConfig {
   metalness: number;
   roughness: number;
   opacity?: number;
+  borderRadius?: number;      // v1.1 新增：圆角半径（苹果风格）
 }
 
 /**
@@ -287,10 +314,15 @@ export interface LightTheme {
 
 /**
  * 背景配置（环境主题）
+ * v1.1 扩展：支持渐变色（经典主题上浅下深）
  */
 export interface BackgroundTheme {
   type: BackgroundType;
-  value: number | string[];   // 颜色(hex)或天空盒路径数组(6面)
+  // v1.1 扩展：支持渐变色
+  // color: 单色背景（number）
+  // gradient: 渐变配置 { top: number; bottom: number }
+  // skybox: 天空盒6面路径（string[]）
+  value: number | string[] | { top: number; bottom: number };
 }
 
 /**

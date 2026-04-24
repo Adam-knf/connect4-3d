@@ -1,13 +1,22 @@
 /**
  * AIPlayer AI决策模块
- * Minimax + Alpha-Beta 剪枝 + 失误率机制
- * 支持三种难度：EASY、MEDIUM、HARD
+ * v3.1 分层评估架构 + Layer 3 潜在叉子检测
+ *
+ * 难度配置：
+ * - EASY: depth=2, 10%失误, 无Minimax, 无Layer3
+ * - MEDIUM: depth=3, 0%失误, 启用Minimax+Layer3
+ * - HARD: depth=4, 0%失误, 启用Minimax+Layer3, 叉子分数×1.5
+ * 
+ * v3.1 优化：
+ * - Layer 3 只在顶层候选评估使用（评估放置后局面）
+ * - 引入折扣机制（不可下空位越多，潜力越低）
+ * - 异步时间片处理，避免 UI 阻塞
  */
 
-import type { Player, Position, Difficulty } from '@/types';
+import type { Player, Position, Difficulty, DifficultyConfig, LineRecord } from '@/types';
 import { Board } from './Board';
 import { WinChecker } from './WinChecker';
-import { EVAL_WEIGHTS, getAIConfig, getAIThinkDelay } from '@/config/aiConfig';
+import { EVAL_SCORES, getDifficultyConfig, getAIThinkDelay } from '@/config/aiConfig';
 import { BOARD_CONFIG } from '@/config/gameConfig';
 
 /**
@@ -20,18 +29,29 @@ interface Evaluation {
 }
 
 /**
+ * Layer 3 位置统计信息
+ */
+interface PositionStats {
+  aiPotentialLines: number;
+  oppPotentialLines: number;
+  aiMaxCount: number;
+  oppMaxCount: number;
+  aiHasTwo: boolean;
+  oppHasTwo: boolean;
+  aiDiscount: number;
+  oppDiscount: number;
+}
+
+/**
  * AI决策类
- * 实现博弈树搜索 + 随机失误
+ * 实现分层评估 + 博弈树搜索 + 随机失误
  */
 export class AIPlayer {
-  /** 当前难度 */
-  private difficulty: Difficulty;
+  /** 当前难度配置 */
+  private config: DifficultyConfig;
 
-  /** 当前搜索深度 */
-  private searchDepth: number = 2;
-
-  /** 失误率 */
-  private mistakeRate: number = 0.1;
+  /** 当前难度名称（用于准确识别） */
+  private currentDifficulty: Difficulty;
 
   /** AI棋子类型 */
   private aiPiece: Player;
@@ -47,22 +67,13 @@ export class AIPlayer {
    * @param difficulty 初始难度
    */
   constructor(difficulty: Difficulty = 'MEDIUM') {
-    this.difficulty = difficulty;
+    this.currentDifficulty = difficulty;
     this.aiPiece = 'WHITE';  // 默认 AI 是白棋（后手）
     this.opponentPiece = 'BLACK';
     this.nodeCount = 0;
 
-    // 初始化搜索深度和失误率
-    this.updateConfig();
-  }
-
-  /**
-   * 更新难度配置
-   */
-  private updateConfig(): void {
-    const config = getAIConfig(this.difficulty);
-    this.searchDepth = config.depth;
-    this.mistakeRate = config.mistakeRate;
+    // 初始化难度配置
+    this.config = getDifficultyConfig(difficulty);
   }
 
   /**
@@ -70,8 +81,8 @@ export class AIPlayer {
    * @param difficulty 难度级别
    */
   setDifficulty(difficulty: Difficulty): void {
-    this.difficulty = difficulty;
-    this.updateConfig();
+    this.currentDifficulty = difficulty;
+    this.config = getDifficultyConfig(difficulty);
   }
 
   /**
@@ -93,27 +104,22 @@ export class AIPlayer {
     this.nodeCount = 0;
 
     // 获取思考延迟
-    const thinkDelay = getAIThinkDelay(this.difficulty);
+    const thinkDelay = getAIThinkDelay(this.getDifficulty());
 
     // 使用 requestIdleCallback 实现真正异步
-    // 在空闲时间执行计算，不阻塞渲染
     return new Promise((resolve) => {
-      // 先等待思考延迟
-      setTimeout(() => {
-        // 使用 requestIdleCallback 在空闲时间计算
-        // 如果不支持（旧浏览器），fallback 到 setTimeout
+      setTimeout(async () => {
         if ('requestIdleCallback' in window) {
           requestIdleCallback(
-            () => {
-              const result = this.calculateBestMove(board);
+            async () => {
+              const result = await this.calculateBestMove(board);
               resolve(result);
             },
-            { timeout: 5000 }  // 最多等待5秒
+            { timeout: 5000 }
           );
         } else {
-          // Fallback: 使用 setTimeout(0) 放入下一个事件循环
-          setTimeout(() => {
-            const result = this.calculateBestMove(board);
+          setTimeout(async () => {
+            const result = await this.calculateBestMove(board);
             resolve(result);
           }, 0);
         }
@@ -122,19 +128,19 @@ export class AIPlayer {
   }
 
   /**
-   * 计算最佳落子位置
+   * 计算最佳落子位置（异步分片，避免阻塞 UI）
    * @param board 当前棋盘状态
    * @returns 最佳位置 (x, y)
    */
-  private calculateBestMove(board: Board): { x: number; y: number } {
-    // 获取所有候选位置
+  private async calculateBestMove(board: Board): Promise<{ x: number; y: number }> {
+    const startTime = performance.now();
+
     const candidates = board.getAvailableColumns();
 
     if (candidates.length === 0) {
       throw new Error('No available columns');
     }
 
-    // 如果只有1个候选，直接返回
     if (candidates.length === 1) {
       return candidates[0];
     }
@@ -143,92 +149,474 @@ export class AIPlayer {
     const evaluations: Evaluation[] = [];
 
     console.log(`[AI Debug] 棋盘状态: ${board.getPieceCount()}颗棋子`);
-    console.log(`[AI Debug] AI视角: ${this.aiPiece}, 搜索深度: ${this.searchDepth}`);
+    console.log(`[AI Debug] AI视角: ${this.aiPiece}, 难度: ${this.getDifficulty()}, 搜索深度: ${this.config.depth}`);
 
+    // 时间片处理：每 16ms (一帧) 让出主线程，保持 UI 流畅
+    const TIME_SLICE_MS = 16;
+    let lastYieldTime = performance.now();
+    
     for (const { x, y } of candidates) {
       const z = board.findDropPosition(x, y);
       if (z === -1) continue;
 
       const pos = { x, y, z };
-      const score = this.evaluateMove(board, pos);
-      evaluations.push({ x, y, score });
+      const score = this.layeredEvaluate(board, pos);
 
-      // 详细日志
+      evaluations.push({ x, y, score });
       console.log(`[AI Debug] (${x},${y},${z}) => score=${score}`);
+      
+      // 检查是否超过时间片，需要让出主线程
+      if (performance.now() - lastYieldTime > TIME_SLICE_MS) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        lastYieldTime = performance.now();
+      }
     }
 
     // 排序（分数从高到低）
     evaluations.sort((a, b) => b.score - a.score);
 
     // 根据失误率决定是否选择次优解
-    if (this.shouldMakeMistake() && evaluations.length > 1) {
-      // 随机选择一个次优解（排除最优）
+    if (this.shouldMakeMistake(evaluations[0].score) && evaluations.length > 1) {
       const suboptimal = evaluations.slice(1);
       const randomIndex = Math.floor(Math.random() * Math.min(3, suboptimal.length));
       console.log(`[AI] Mistake! Choosing suboptimal #${randomIndex + 2} (score: ${suboptimal[randomIndex].score})`);
       return suboptimal[randomIndex];
     }
 
-    // 返回最优解
+    const elapsed = performance.now() - startTime;
     console.log(`[AI] Best move (${evaluations[0].x}, ${evaluations[0].y}) score: ${evaluations[0].score}, nodes: ${this.nodeCount}`);
+    console.log(`[AI Performance] calculateBestMove took ${elapsed.toFixed(2)}ms`);
     return evaluations[0];
   }
 
   /**
-   * 判断是否失误（随机选择次优解）
+   * 分层评估函数（核心）
+   * 根据难度配置决定启用哪些评估层
+   * @param board 棋盘状态
+   * @param pos 放置位置
+   * @returns 评估分数
    */
-  private shouldMakeMistake(): boolean {
-    return Math.random() < this.mistakeRate;
+  private layeredEvaluate(board: Board, pos: Position): number {
+    // ==================== Layer 0 ====================
+    // 立即胜负检测（所有难度启用）
+
+    // 己方立即获胜
+    if (this.config.layers.enableImmediateWin) {
+      const selfWin = WinChecker.quickWouldWinFast(board, pos, this.aiPiece);
+      if (selfWin) {
+        console.log(`[AI Debug]   -> Layer0: 立即获胜!`);
+        return EVAL_SCORES.WIN;
+      }
+
+      // 对方立即获胜（需阻挡）
+      const opponentWin = WinChecker.quickWouldWinFast(board, pos, this.opponentPiece);
+      if (opponentWin) {
+        console.log(`[AI Debug]   -> Layer0: 阻挡对手获胜!`);
+        return EVAL_SCORES.BLOCK_WIN;
+      }
+    }
+
+    // ==================== Layer 1 ====================
+    // 基础3连威胁检测
+    let layer1Score = 0;
+
+    if (this.config.layers.enableBasicThreat) {
+      layer1Score = this.evaluateLayer1(board, pos);
+      console.log(`[AI Debug]   -> Layer1 score: ${layer1Score}`);
+
+      // 如果 Layer 1 有显著分数（威胁），直接返回
+      // 避免被后续层覆盖或稀释
+      if (Math.abs(layer1Score) >= EVAL_SCORES.THREE_BLOCK) {
+        // 有3连威胁，先看是否需要进入Layer 2处理双威胁
+        if (!this.config.layers.enableAdvancedThreat) {
+          return layer1Score;
+        }
+      }
+    }
+
+    // ==================== Layer 2 ====================
+    // 进阶威胁检测（双威胁+2连）
+    let layer2Score = 0;
+
+    if (this.config.layers.enableAdvancedThreat) {
+      layer2Score = this.evaluateLayer2(board, pos);
+      console.log(`[AI Debug]   -> Layer2 score: ${layer2Score}`);
+
+      // 双威胁分数极高，直接返回
+      if (Math.abs(layer2Score) >= EVAL_SCORES.DOUBLE_THREAT_BLOCK) {
+        return layer1Score + layer2Score;
+      }
+    }
+
+    // ==================== Layer 3 ====================
+    // 潜在叉子检测（顶层候选评估，评估放置后的局面）
+    let layer3Score = 0;
+    
+    if (this.config.layers.enablePotentialFork) {
+      // 模拟放置后评估叉子局势
+      const clonedBoard = board.clone();
+      clonedBoard.setPiece(pos, this.aiPiece);
+      layer3Score = this.evaluateLayer3_PotentialFork(clonedBoard);
+      console.log(`[AI Debug]   -> Layer3 fork score: ${layer3Score}`);
+    }
+
+    // ==================== Layer 4 ====================
+    // Minimax深度搜索（MEDIUM/HARD启用）
+    if (this.config.layers.enableMinimaxSearch && this.config.depth > 1) {
+      const clonedBoard = board.clone();
+      clonedBoard.setPiece(pos, this.aiPiece);
+
+      const minimaxScore = this.minimax(
+        clonedBoard,
+        this.config.depth - 1,
+        -Infinity,
+        Infinity,
+        false
+      );
+      // Minimax + Layer 1/2/3 分数
+      const totalScore = minimaxScore + layer1Score + layer2Score + layer3Score;
+      console.log(`[AI Debug]   -> Layer4 minimax: ${minimaxScore}, total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score})`);
+      return totalScore;
+    }
+
+    // 深度为1或无Minimax时，返回静态评估
+    const staticScore = this.staticEvaluate(board, pos);
+    const totalScore = layer1Score + layer2Score + layer3Score + staticScore;
+    console.log(`[AI Debug]   -> Static total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score}, base=${staticScore})`);
+    return totalScore;
   }
 
   /**
-   * 评估单个落子位置
-   * @param board 当前棋盘
-   * @param pos 放置位置（已计算重力落点）
-   * @returns 评估分数
+   * Layer 1: 基础3连威胁评估
+   * 所有难度都完整检测（不再简化）
+   * @param board 棋盘状态
+   * @param pos 放置位置
+   * @returns Layer 1 分数
    */
-  private evaluateMove(board: Board, pos: Position): number {
-    // 优先检测：能否立即获胜
-    const winResult = WinChecker.quickWouldWinFast(board, pos, this.aiPiece);
-    if (winResult) {
-      console.log(`[AI Debug]   -> 立即获胜!`);
-      return EVAL_WEIGHTS.WIN;  // 最高分
+  private evaluateLayer1(board: Board, pos: Position): number {
+    const lineIds = board.getLineIdsAtPosition(pos);
+    let score = 0;
+
+    for (const lineId of lineIds) {
+      const line = board.getLineRecord(lineId);
+      if (!line) continue;
+
+      const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
+      const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
+
+      // ===== 己方3连威胁 =====
+      if (oppCount === 0 && aiCount === 3 && line.openEnds > 0) {
+        score += EVAL_SCORES.THREE_OWN;  // 150
+      }
+
+      // ===== 对方3连威胁（需阻挡） =====
+      if (aiCount === 0 && oppCount === 3 && line.openEnds > 0) {
+        score += EVAL_SCORES.THREE_BLOCK;  // 300（防守优先）
+      }
     }
 
-    // 优先检测：对手能否立即获胜（需要阻挡）
-    const opponentWin = WinChecker.quickWouldWinFast(board, pos, this.opponentPiece);
-    if (opponentWin) {
-      console.log(`[AI Debug]   -> 阻挡对手获胜!`);
-      return EVAL_WEIGHTS.BLOCK_WIN;  // 高分阻挡
+    return score;
+  }
+
+  /**
+   * Layer 2: 进阶威胁评估（双威胁+2连）
+   * 所有难度启用
+   *
+   * 关键改进：两条2连 = 潜在双威胁（高分）
+   * - 单条2连 = 20分（低分，对手一步可堵）
+   * - 两条2连 = 300分（下一颗棋子必成双3连）
+   *
+   * BUG修复：评估"放置后"的威胁线状态，而非"放置前"
+   *
+   * @param board 棋盘状态
+   * @param pos 放置位置
+   * @returns Layer 2 分数
+   */
+  private evaluateLayer2(board: Board, pos: Position): number {
+    const lineIds = board.getLineIdsAtPosition(pos);
+
+    // 统计该位置涉及的威胁线数量（放置后的状态）
+    let aiThreeLines = 0;
+    let oppThreeLines = 0;
+    let aiTwoLines = 0;
+    let oppTwoLines = 0;
+
+    for (const lineId of lineIds) {
+      const line = board.getLineRecord(lineId);
+      if (!line) continue;
+
+      const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
+      const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
+
+      // 关键修复：计算"放置后"的count
+      // 如果当前线无对方棋子，放置这颗棋子后count会增加1
+      const aiCountAfter = (oppCount === 0) ? aiCount + 1 : aiCount;
+
+      // 3连威胁线统计（放置后count=3）
+      if (aiCountAfter === 3 && oppCount === 0 && line.openEnds > 0) {
+        aiThreeLines++;
+      }
+      if (oppCount === 3 && aiCount === 0 && line.openEnds > 0) {
+        oppThreeLines++;
+      }
+
+      // 2连威胁线统计（放置后count=2）
+      // 关键：aiCountAfter=2 意味着"放置后这条线有2颗己方棋子"
+      if (aiCountAfter === 2 && oppCount === 0 && line.openEnds > 0) {
+        aiTwoLines++;
+      }
+      if (oppCount === 2 && aiCount === 0 && line.openEnds > 0) {
+        oppTwoLines++;
+      }
     }
 
-    // 模拟放置棋子
-    const clonedBoard = board.clone();
-    clonedBoard.setPiece(pos, this.aiPiece);
+    // ===== 双威胁评分 =====
+    let score = 0;
 
-    // 使用 Minimax 搜索（深度 > 1 时）
-    if (this.searchDepth > 1) {
-      const minimaxScore = this.minimax(
-        clonedBoard,
-        this.searchDepth - 1,
-        -Infinity,
-        Infinity,
-        false  // 下一层是对手回合
-      );
-      console.log(`[AI Debug]   -> minimax=${minimaxScore}`);
-      // 注意：positionBonus 仅用于候选排序（sortCandidates），不叠加到最终分数
-      // 依据：ADR-011 评估系统统一架构设计
-      return minimaxScore;
+    // 己方双3连威胁 → 必胜机会
+    if (aiThreeLines >= 2) {
+      score += EVAL_SCORES.DOUBLE_THREAT_OWN;  // 500
     }
 
-    // 深度为1时，直接使用静态评估
-    const staticScore = this.staticEvaluate(clonedBoard, this.aiPiece);
-    console.log(`[AI Debug]   -> static=${staticScore}`);
-    return staticScore;
+    // 对方双3连威胁 → 必须阻挡
+    if (oppThreeLines >= 2) {
+      score += EVAL_SCORES.DOUBLE_THREAT_BLOCK;  // 1000
+    }
+
+    // ===== 两条2连 = 潜在双威胁（v2.1关键改进）=====
+    // 两条2连 ≠ 两个独立2连
+    // 两条2连意味着：下一颗棋子就能形成真正的双3连威胁
+    // 因此给予接近双3连威胁的高分
+
+    if (aiTwoLines >= 2) {
+      score += EVAL_SCORES.POTENTIAL_DOUBLE_OWN;   // 300（高分）
+      console.log(`[AI Debug]     -> 两条2连威胁检测！aiTwoLines=${aiTwoLines}`);
+    } else if (aiTwoLines === 1) {
+      score += EVAL_SCORES.TWO_OWN;                 // 20（单条2连低分）
+    }
+
+    if (oppTwoLines >= 2) {
+      score += EVAL_SCORES.POTENTIAL_DOUBLE_BLOCK; // 600（防守优先！）
+    } else if (oppTwoLines === 1) {
+      score += EVAL_SCORES.TWO_BLOCK;               // 40（单条2连）
+    }
+
+    return score;
+  }
+
+  /**
+   * 静态评估（无威胁时的基础评分）
+   * @param board 棋盘状态（放置后）
+   * @param pos 放置位置
+   * @returns 基础分数
+   */
+  private staticEvaluate(board: Board, pos: Position): number {
+    // 使用 LineIndex 的评估分数作为基础
+    const lineScore = board.getEvaluationScore(this.aiPiece, false);
+
+    // 加上位置加分（中心位置略优）
+    const positionBonus = this.positionBonus(pos);
+
+    return lineScore + positionBonus;
+  }
+
+  /**
+   * Layer 3: 潜在叉子检测
+   * v3.1 优化：识别多条有潜力的线交汇于同一点的模式
+   * 
+   * 性能优化：
+   * - 增量更新：只扫描有棋子的线，而非全局扫描
+   * - 折扣机制：不可直接下的空位越多，潜力越低
+   * - 取最大值：避免累加导致分数过高
+   * 
+   * @param board 棋盘状态
+   * @returns 潜在叉子评分
+   */
+  private evaluateLayer3_PotentialFork(board: Board): number {
+    // 增量更新 - 只扫描有棋子的线
+    const allLines = board.getAllLineRecords();
+    const relevantLines = allLines.filter(line => 
+      line.blackCount > 0 || line.whiteCount > 0
+    );
+    
+    // 位置 → 潜力统计
+    const positionStats = new Map<string, PositionStats>();
+
+    // 遍历受影响的4连线（方案3：增量更新）
+    for (const line of relevantLines) {
+      const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
+      const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
+
+      // 己方有潜力的线
+      if (oppCount === 0 && aiCount >= 1 && line.openEnds > 0) {
+        if (this.isConsecutive(board, line, this.aiPiece)) {
+          const discount = this.calculateLineDiscount(board, line);
+          this.updatePositionStats(positionStats, line.positions, 'ai', aiCount, board, discount);
+        }
+      }
+
+      // 对方有潜力的线
+      if (aiCount === 0 && oppCount >= 1 && line.openEnds > 0) {
+        if (this.isConsecutive(board, line, this.opponentPiece)) {
+          const discount = this.calculateLineDiscount(board, line);
+          this.updatePositionStats(positionStats, line.positions, 'opp', oppCount, board, discount);
+        }
+      }
+    }
+
+    // 计算叉子分数（取最强叉子，应用折扣）
+    let maxOppForkScore = 0;
+    let maxAiForkScore = 0;
+    const multiplier = this.config.forkScoreMultiplier || 1.0;
+
+    for (const stats of positionStats.values()) {
+      // 对方潜在叉子（防守优先）- 取最大值，应用折扣
+      if (stats.oppPotentialLines >= 2) {
+        let forkScore = EVAL_SCORES.FORK_BASE;
+        forkScore += EVAL_SCORES.FORK_PER_LINE * (stats.oppPotentialLines - 2);
+        if (stats.oppHasTwo) {
+          forkScore += EVAL_SCORES.FORK_WITH_TWO;
+        }
+        // 应用折扣：线上不可下的空位越多，分数越低
+        const discountedScore = forkScore * EVAL_SCORES.FORK_DEFENSE_MULTIPLIER * multiplier * stats.oppDiscount;
+        maxOppForkScore = Math.max(maxOppForkScore, discountedScore);
+      }
+
+      // 己方潜在叉子 - 取最大值，应用折扣
+      if (stats.aiPotentialLines >= 2) {
+        let forkScore = EVAL_SCORES.FORK_BASE;
+        forkScore += EVAL_SCORES.FORK_PER_LINE * (stats.aiPotentialLines - 2);
+        if (stats.aiHasTwo) {
+          forkScore += EVAL_SCORES.FORK_WITH_TWO;
+        }
+        const discountedScore = forkScore * multiplier * stats.aiDiscount;
+        maxAiForkScore = Math.max(maxAiForkScore, discountedScore);
+      }
+    }
+
+    const score = maxAiForkScore - maxOppForkScore;
+    return score;
+  }
+
+  /**
+   * 检查线上的棋子是否连续（无间隔）
+   * 
+   * 例如：[黑,空,黑,空] 不连续（中间有空隙）
+   *      [黑,黑,空,空] 连续
+   * 
+   * @param board 棋盘状态
+   * @param line 4连记录
+   * @param player 玩家类型
+   * @returns 是否连续
+   */
+  private isConsecutive(board: Board, line: LineRecord, player: Player): boolean {
+    let state: 'before' | 'in' | 'after' = 'before';
+    
+    for (const pos of line.positions) {
+      const piece = board.getPiece(pos);
+      
+      if (piece === player) {
+        if (state === 'after') return false;  // 中间有空隙后又遇到棋子
+        state = 'in';
+      } else if (piece === 'EMPTY') {
+        if (state === 'in') state = 'after';
+      } else {
+        // 对方棋子 - 不应该出现（因为已经过滤了oppCount=0）
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  /**
+   * 计算线的潜力折扣
+   * 空位不可直接下的越多，折扣越大
+   * 
+   * @param board 棋盘状态
+   * @param line 4连记录
+   * @returns 折扣系数 (0~1)，1=无折扣，0.5=折半，0.25=再折半
+   */
+  private calculateLineDiscount(board: Board, line: LineRecord): number {
+    let unplayableCount = 0;
+    
+    for (const pos of line.positions) {
+      const piece = board.getPiece(pos);
+      if (piece !== 'EMPTY') continue;  // 已有棋子，不算
+      
+      // 检查是否可直接下：z=0 或 下方有棋子
+      if (pos.z > 0) {
+        const belowPiece = board.getPiece({ x: pos.x, y: pos.y, z: pos.z - 1 });
+        if (belowPiece === 'EMPTY') {
+          unplayableCount++;  // 不可直接下
+        }
+      }
+    }
+    
+    // 每个不可下的空位折半
+    return Math.pow(0.5, unplayableCount);
+  }
+
+  /**
+   * 更新位置统计信息
+   * 
+   * @param stats 统计Map
+   * @param positions 位置数组
+   * @param side 哪一方（'ai' 或 'opp'）
+   * @param count 棋子数量
+   * @param board 棋盘状态
+   * @param discount 折扣系数
+   */
+  private updatePositionStats(
+    stats: Map<string, any>,
+    positions: Position[],
+    side: 'ai' | 'opp',
+    count: number,
+    board: Board,
+    discount: number
+  ): void {
+    for (const pos of positions) {
+      // 只统计可直接下的空位
+      const piece = board.getPiece(pos);
+      if (piece !== 'EMPTY') continue;
+      
+      if (pos.z > 0) {
+        const belowPiece = board.getPiece({ x: pos.x, y: pos.y, z: pos.z - 1 });
+        if (belowPiece === 'EMPTY') continue;
+      }
+      
+      const key = `${pos.x},${pos.y},${pos.z}`;
+      if (!stats.has(key)) {
+        stats.set(key, {
+          aiPotentialLines: 0,
+          oppPotentialLines: 0,
+          aiMaxCount: 0,
+          oppMaxCount: 0,
+          aiHasTwo: false,
+          oppHasTwo: false,
+          aiDiscount: 1,
+          oppDiscount: 1,
+        });
+      }
+      const data = stats.get(key)!;
+      
+      if (side === 'ai') {
+        data.aiPotentialLines++;
+        data.aiMaxCount = Math.max(data.aiMaxCount, count);
+        if (count >= 2) data.aiHasTwo = true;
+        data.aiDiscount = Math.min(data.aiDiscount, discount);  // 取最小折扣
+      } else {
+        data.oppPotentialLines++;
+        data.oppMaxCount = Math.max(data.oppMaxCount, count);
+        if (count >= 2) data.oppHasTwo = true;
+        data.oppDiscount = Math.min(data.oppDiscount, discount);
+      }
+    }
   }
 
   /**
    * Minimax 搜索 + Alpha-Beta 剪枝
+   * 仅HARD启用，depth=4
    * @param board 棋盘状态
    * @param depth 搜索深度
    * @param alpha Alpha 值
@@ -247,16 +635,17 @@ export class AIPlayer {
 
     // 终止条件：深度为0或游戏结束
     if (depth === 0) {
-      return this.staticEvaluate(board, this.aiPiece);
+      // 基础全局评估（Layer 3 只在顶层候选评估使用，不在叶节点）
+      return board.getEvaluationScore(this.aiPiece);
     }
 
     // 检测游戏是否结束
     const winResult = board.checkWinWithIndex();
     if (winResult) {
       if (winResult.winner === this.aiPiece) {
-        return EVAL_WEIGHTS.WIN;
+        return EVAL_SCORES.WIN;
       } else {
-        return -EVAL_WEIGHTS.WIN;
+        return -EVAL_SCORES.WIN;
       }
     }
 
@@ -268,7 +657,7 @@ export class AIPlayer {
     // 获取候选位置
     const candidates = board.getAvailableColumns();
 
-    // 优化：候选位置排序（优先检测威胁位置）
+    // 候选排序优化（优先探索高分位置）
     const sortedCandidates = this.sortCandidates(board, candidates, isMaximizing);
 
     if (isMaximizing) {
@@ -283,7 +672,6 @@ export class AIPlayer {
 
         // 模拟放置
         board.setPiece(pos, this.aiPiece);
-
         const score = this.minimax(board, depth - 1, alpha, beta, false);
 
         // 回溯
@@ -292,10 +680,8 @@ export class AIPlayer {
         maxScore = Math.max(maxScore, score);
         alpha = Math.max(alpha, score);
 
-        // Alpha-Beta 剪枝
-        if (beta <= alpha) {
-          break;
-        }
+        // Alpha-Beta剪枝
+        if (beta <= alpha) break;
       }
 
       return maxScore;
@@ -311,7 +697,6 @@ export class AIPlayer {
 
         // 模拟放置
         board.setPiece(pos, this.opponentPiece);
-
         const score = this.minimax(board, depth - 1, alpha, beta, true);
 
         // 回溯
@@ -320,10 +705,8 @@ export class AIPlayer {
         minScore = Math.min(minScore, score);
         beta = Math.min(beta, score);
 
-        // Alpha-Beta 剪枝
-        if (beta <= alpha) {
-          break;
-        }
+        // Alpha-Beta剪枝
+        if (beta <= alpha) break;
       }
 
       return minScore;
@@ -342,7 +725,6 @@ export class AIPlayer {
     const currentPlayer = isMaximizing ? this.aiPiece : this.opponentPiece;
     const opponent = isMaximizing ? this.opponentPiece : this.aiPiece;
 
-    // 计算每个候选的优先级分数
     const scored = candidates.map(({ x, y }) => {
       const z = board.findDropPosition(x, y);
       if (z === -1) return { x, y, priority: -Infinity };
@@ -368,39 +750,33 @@ export class AIPlayer {
       return { x, y, priority };
     });
 
-    // 按优先级排序
     scored.sort((a, b) => b.priority - a.priority);
 
     return scored.map(({ x, y }) => ({ x, y }));
   }
 
   /**
-   * 静态评估函数
-   * 使用 LineIndex 的威胁评估（唯一评分来源）
-   * 依据：ADR-011 评估系统统一架构设计
-   * @param board 棋盘状态
-   * @param player 当前视角玩家（AI）
-   * @returns 评估分数
-   */
-  private staticEvaluate(board: Board, player: Player): number {
-    // 使用 LineIndex 的评估分数（唯一评分来源）
-    // LineIndex 已隐式包含位置价值（中心位置涉及的4连更多）
-    return board.getEvaluationScore(player, true);
-  }
-
-  /**
    * 位置加分计算
    * 中心位置获得更高分数
-   * @param pos 位置
-   * @returns 加分值
    */
   private positionBonus(pos: Position): number {
     const width = BOARD_CONFIG.width;
     const center = Math.floor(width / 2);
-
-    // 距离中心越近，加分越高
     const distToCenter = Math.abs(pos.x - center) + Math.abs(pos.y - center);
-    return EVAL_WEIGHTS.CENTER_POSITION * (width - distToCenter);
+    return EVAL_SCORES.CENTER_BONUS * (width - distToCenter);
+  }
+
+  /**
+   * 判断是否失误（随机选择次优解）
+   * MEDIUM/HARD：关键时刻（WIN/BLOCK_WIN）不失误
+   * EASY：可能关键时刻失误
+   */
+  private shouldMakeMistake(bestScore: number): boolean {
+    // 关键时刻不失误（WIN/BLOCK_WIN）
+    if (this.config.criticalNoMistake && bestScore >= EVAL_SCORES.BLOCK_WIN) {
+      return false;
+    }
+    return Math.random() < this.config.mistakeRate;
   }
 
   /**
@@ -414,13 +790,20 @@ export class AIPlayer {
    * 获取当前难度
    */
   getDifficulty(): Difficulty {
-    return this.difficulty;
+    return this.currentDifficulty;
   }
 
   /**
    * 获取当前搜索深度
    */
   getSearchDepth(): number {
-    return this.searchDepth;
+    return this.config.depth;
+  }
+
+  /**
+   * 获取当前配置（调试用）
+   */
+  getConfig(): DifficultyConfig {
+    return this.config;
   }
 }

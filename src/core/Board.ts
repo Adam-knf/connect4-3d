@@ -4,7 +4,7 @@
  * 集成四连索引（LineIndex）优化连线检测
  */
 
-import type { Player, Position, WinResult } from '@/types';
+import type { Player, Position, WinResult, LineRecord } from '@/types';
 import { BOARD_CONFIG } from '@/config/gameConfig';
 import { LineIndex } from './LineIndex';
 
@@ -332,5 +332,31 @@ export class Board {
    */
   getEvaluationScore(player: Player, debug: boolean = false): number {
     return this.lineIndex.getEvaluationScore(player, debug);
+  }
+
+  /**
+   * 获取位置涉及的4连ID列表（委托给LineIndex）
+   * @param pos 位置坐标
+   * @returns 4连ID列表
+   */
+  getLineIdsAtPosition(pos: Position): number[] {
+    return this.lineIndex.getLineIdsAtPosition(pos);
+  }
+
+  /**
+   * 获取指定4连的完整记录（委托给LineIndex）
+   * @param lineId 4连ID
+   * @returns 4连记录或null
+   */
+  getLineRecord(lineId: number): LineRecord | null {
+    return this.lineIndex.getLineRecord(lineId);
+  }
+
+  /**
+   * 获取所有4连记录（用于全局评估）
+   * @returns 所有4连记录数组
+   */
+  getAllLineRecords(): LineRecord[] {
+    return this.lineIndex.getAllLines();
   }
 }

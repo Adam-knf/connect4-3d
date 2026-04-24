@@ -3,28 +3,11 @@
  * 预计算所有可能的4连组合，提供增量更新和快速查询
  */
 
-import type { Position, Vector3, Player, WinResult } from '@/types';
+import type { Position, Vector3, Player, WinResult, LineRecord } from '@/types';
 import { WIN_LINE_LENGTH } from '@/types';
 
-/**
- * 四连记录
- */
-interface LineRecord {
-  /** 唯一ID */
-  id: number;
-  /** 4个位置坐标 */
-  positions: Position[];
-  /** 方向向量 */
-  direction: Vector3;
-  /** 黑棋数量 (0-4) */
-  blackCount: number;
-  /** 白棋数量 (0-4) */
-  whiteCount: number;
-  /** 开放端数量 (0-2) - 两端可延伸的位置数 */
-  openEnds: number;
-  /** 可立即下的开放端数量 (0-2) - 开放端底层已有棋子，可立即放置 */
-  readyEnds: number;
-}
+// 导出 LineRecord 类型（供外部使用）
+export type { LineRecord } from '@/types';
 
 /**
  * 四连状态
@@ -274,6 +257,19 @@ export class LineIndex {
   getLineIdsAtPosition(pos: Position): number[] {
     const posKey = this.encodePosition(pos);
     return this.posToLineIds.get(posKey) || [];
+  }
+
+  /**
+   * 获取指定4连的完整记录
+   * 用于AI分层评估函数查询线的详细信息
+   * @param lineId 4连ID
+   * @returns 4连记录（如果ID无效返回null）
+   */
+  getLineRecord(lineId: number): LineRecord | null {
+    if (lineId < 0 || lineId >= this.lines.length) {
+      return null;
+    }
+    return this.lines[lineId];
   }
 
   /**
