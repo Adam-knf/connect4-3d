@@ -16,6 +16,7 @@
 import type { Player, Position, Difficulty, DifficultyConfig, LineRecord } from '@/types';
 import { Board } from './Board';
 import { WinChecker } from './WinChecker';
+import { LineIndex } from './LineIndex';
 import { EVAL_SCORES, getDifficultyConfig, getAIThinkDelay } from '@/config/aiConfig';
 import { BOARD_CONFIG } from '@/config/gameConfig';
 
@@ -109,7 +110,7 @@ export class AIPlayer {
     // 使用 requestIdleCallback 实现真正异步
     return new Promise((resolve) => {
       setTimeout(async () => {
-        if ('requestIdleCallback' in window) {
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
           requestIdleCallback(
             async () => {
               const result = await this.calculateBestMove(board);
@@ -257,6 +258,13 @@ export class AIPlayer {
       const clonedBoard = board.clone();
       clonedBoard.setPiece(pos, this.aiPiece);
       layer3Score = this.evaluateLayer3_PotentialFork(clonedBoard);
+
+      // Minimax深度≥3时Layer3降权：避免双倍计分
+      // depth=4下Minimax内部的evaluateInternalNode提供更准确的fork信号
+      if (this.config.layers.enableMinimaxSearch && this.config.depth >= 3) {
+        layer3Score = Math.round(layer3Score * 0.05);
+      }
+
       console.log(`[AI Debug]   -> Layer3 fork score: ${layer3Score}`);
     }
 
@@ -341,6 +349,10 @@ export class AIPlayer {
     let aiTwoLines = 0;
     let oppTwoLines = 0;
 
+    // 方向去重：同一物理直线上的重叠4连段只计1次
+    const countedAiDirs = new Set<string>();
+    const countedOppDirs = new Set<string>();
+
     for (const lineId of lineIds) {
       const line = board.getLineRecord(lineId);
       if (!line) continue;
@@ -348,25 +360,39 @@ export class AIPlayer {
       const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
       const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
 
+      // 方向 key
+      const dirKey = `${line.direction.x},${line.direction.y},${line.direction.z}`;
+
       // 关键修复：计算"放置后"的count
       // 如果当前线无对方棋子，放置这颗棋子后count会增加1
       const aiCountAfter = (oppCount === 0) ? aiCount + 1 : aiCount;
 
       // 3连威胁线统计（放置后count=3）
       if (aiCountAfter === 3 && oppCount === 0 && line.openEnds > 0) {
-        aiThreeLines++;
+        if (!countedAiDirs.has(dirKey)) {
+          countedAiDirs.add(dirKey);
+          aiThreeLines++;
+        }
       }
       if (oppCount === 3 && aiCount === 0 && line.openEnds > 0) {
-        oppThreeLines++;
+        if (!countedOppDirs.has(dirKey)) {
+          countedOppDirs.add(dirKey);
+          oppThreeLines++;
+        }
       }
 
       // 2连威胁线统计（放置后count=2）
-      // 关键：aiCountAfter=2 意味着"放置后这条线有2颗己方棋子"
       if (aiCountAfter === 2 && oppCount === 0 && line.openEnds > 0) {
-        aiTwoLines++;
+        if (!countedAiDirs.has(dirKey)) {
+          countedAiDirs.add(dirKey);
+          aiTwoLines++;
+        }
       }
       if (oppCount === 2 && aiCount === 0 && line.openEnds > 0) {
-        oppTwoLines++;
+        if (!countedOppDirs.has(dirKey)) {
+          countedOppDirs.add(dirKey);
+          oppTwoLines++;
+        }
       }
     }
 
@@ -615,6 +641,200 @@ export class AIPlayer {
   }
 
   /**
+   * Minimax 内部节点评估
+   * 在AI落子后、递归前，检测双威胁（双2连、双3连）
+   *
+   * Route C: 扩展点递进评分（替代收敛二值判断）
+   * - 只计数连续2子块且有可用扩展点的2连线
+   * - 0条→0, 1条→20, 2条→80, 3条→300
+   * - 消除不连续棋子造成的假阳性
+   *
+   * @param board 当前棋盘状态（AI刚落子）
+   * @returns 内部加分
+   */
+  private evaluateInternalNode(board: Board): number {
+    const allLines = board.getAllLineRecords();
+    const boardSize = board.getSize();
+
+    // 物理线去重
+    const seenAiKeys = new Set<string>();
+    const seenOppKeys = new Set<string>();
+    let aiThreeLines = 0;
+    let oppThreeLines = 0;
+
+    // 有扩展点的连续2连线计数（不连续的线自动被findExtensionCells排除）
+    let aiLinesWithExt = 0;
+    let oppLinesWithExt = 0;
+
+    for (const line of allLines) {
+      if (line.blackCount === 0 && line.whiteCount === 0) continue;
+
+      const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
+      const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
+      const physKey = LineIndex.getPhysicalLineKey(line, boardSize.width, boardSize.height);
+
+      // 己方威胁（物理线去重）
+      // 注意：
+      // - 不检查 openEnds > 0：openEnds 只反映 segment 两端，可能遗漏中段扩展点
+      // - 不检查 oppCount === 0：对手棋子可能在 segment 端点，不影响 2 连块连续性
+      // - findExtensionCells 是最准确的验证器：验证连续性 + 扩展点可下性
+      if (aiCount >= 2) {
+        if (!seenAiKeys.has(physKey)) {
+          seenAiKeys.add(physKey);
+          if (aiCount >= 3) {
+            aiThreeLines++;
+          } else if (aiCount === 2) {
+            // 只计有扩展点的2连（findExtensionCells自动验证连续性+可下性）
+            const cells = this.findExtensionCells(line, board, this.aiPiece, boardSize);
+            if (cells.length > 0) aiLinesWithExt++;
+          }
+        }
+      }
+
+      // 对方威胁（物理线去重）
+      if (oppCount >= 2) {
+        if (!seenOppKeys.has(physKey)) {
+          seenOppKeys.add(physKey);
+          if (oppCount >= 3) {
+            oppThreeLines++;
+          } else if (oppCount === 2) {
+            const cells = this.findExtensionCells(line, board, this.opponentPiece, boardSize);
+            if (cells.length > 0) oppLinesWithExt++;
+          }
+        }
+      }
+    }
+
+    // ===== 扩展点递进评分 =====
+    let score = 0;
+
+    // 双3连威胁（直接致命，无需扩展点检查）
+    if (aiThreeLines >= 2) score += EVAL_SCORES.DOUBLE_THREAT_OWN;
+    if (oppThreeLines >= 2) score -= EVAL_SCORES.DOUBLE_THREAT_BLOCK;
+
+    // 己方2连：递进加分
+    // 注意：2条和3条以上给相同加分（80），因为 depth=4 下多条威胁线可能有重叠，
+    // 过高的加分会导致搜索树中连接性好的位置获得不成比例的优势。
+    if (aiLinesWithExt >= 2) {
+      score += EVAL_SCORES.TWO_OWN * 4;                  // 2+条 → 80（独立威胁）
+    } else if (aiLinesWithExt === 1) {
+      score += EVAL_SCORES.TWO_OWN;                      // 1条 → 20
+    }
+
+    // 对方2连：递进扣分
+    if (oppLinesWithExt >= 2) {
+      score -= EVAL_SCORES.TWO_BLOCK * 2;               // 2+条 → -80
+    } else if (oppLinesWithExt === 1) {
+      score -= EVAL_SCORES.TWO_BLOCK;                   // 1条 → -40
+    }
+
+    if (score !== 0) {
+      console.log(`[AI Debug]     internalNode: ai=${aiLinesWithExt} ai3=${aiThreeLines} opp=${oppLinesWithExt} opp3=${oppThreeLines} bonus=${score > 0 ? '+' : ''}${score}`);
+    }
+    return score;
+  }
+
+  /**
+   * 找出4连段中连续2子块的扩展点
+   * 扩展点 = 沿直线方向，紧邻连续2块且可下的空位
+   *
+   * 示例：
+   *   4连段 [(0,4),(1,3),(2,2),(3,1)]，方向(1,-1,0)
+   *   Black在索引2,3 → 连续2块
+   *   后方扩展: (2,2)-(1,-1,0) = (1,3,0)
+   *   前方扩展: (3,1)+(1,-1,0) = (4,0,0)
+   *
+   * @param line 4连段记录
+   * @param board 棋盘状态
+   * @param player 玩家
+   * @param boardSize 棋盘尺寸
+   * @returns 可下的扩展点列表
+   */
+  private findExtensionCells(
+    line: LineRecord,
+    board: Board,
+    player: Player,
+    boardSize: { width: number; height: number }
+  ): Position[] {
+    const positions = line.positions;
+    const dir = line.direction;
+
+    // 找连续2子块的起始索引
+    let blockStart = -1;
+    let blockLen = 0;
+
+    for (let i = 0; i < positions.length; i++) {
+      const piece = board.getPiece(positions[i]);
+      if (piece === player) {
+        if (blockStart === -1) blockStart = i;
+        blockLen++;
+      } else if (blockStart >= 0) {
+        break; // 连续块结束
+      }
+    }
+
+    if (blockLen !== 2) return [];
+
+    const extCells: Position[] = [];
+
+    // 后方扩展
+    const backward: Position = {
+      x: positions[blockStart].x - dir.x,
+      y: positions[blockStart].y - dir.y,
+      z: positions[blockStart].z - dir.z,
+    };
+    if (this.isPlayableAt(backward, board, boardSize)) {
+      extCells.push(backward);
+    }
+
+    // 前方扩展
+    const forward: Position = {
+      x: positions[blockStart + 1].x + dir.x,
+      y: positions[blockStart + 1].y + dir.y,
+      z: positions[blockStart + 1].z + dir.z,
+    };
+    if (this.isPlayableAt(forward, board, boardSize)) {
+      extCells.push(forward);
+    }
+
+    return extCells;
+  }
+
+  /**
+   * 检查位置是否可落子
+   * 三个条件：
+   *   1. 坐标在棋盘范围内
+   *   2. 位置为空
+   *   3. 满足重力规则（z=0 或 下方有子）
+   *
+   * @param pos 待检查位置
+   * @param board 棋盘状态
+   * @param boardSize 棋盘尺寸
+   * @returns 是否可下
+   */
+  private isPlayableAt(
+    pos: Position,
+    board: Board,
+    boardSize: { width: number; height: number }
+  ): boolean {
+    if (pos.x < 0 || pos.x >= boardSize.width ||
+        pos.y < 0 || pos.y >= boardSize.width ||
+        pos.z < 0 || pos.z >= boardSize.height) {
+      return false;
+    }
+
+    if (board.getPiece(pos) !== 'EMPTY') return false;
+
+    // 重力检查：z>0时下方必须有子
+    if (pos.z > 0) {
+      const below = board.getPiece({ x: pos.x, y: pos.y, z: pos.z - 1 });
+      if (below === 'EMPTY') return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Minimax 搜索 + Alpha-Beta 剪枝
    * 仅HARD启用，depth=4
    * @param board 棋盘状态
@@ -672,7 +892,14 @@ export class AIPlayer {
 
         // 模拟放置
         board.setPiece(pos, this.aiPiece);
-        const score = this.minimax(board, depth - 1, alpha, beta, false);
+
+        // 内部节点评估：AI落子后检测双威胁
+        // 给搜索树提供持续、可靠的 fork 信号
+        let internalBonus = 0;
+        if (depth > 0) {
+          internalBonus = this.evaluateInternalNode(board);
+        }
+        const score = internalBonus + this.minimax(board, depth - 1, alpha, beta, false);
 
         // 回溯
         board.setPiece(pos, 'EMPTY');

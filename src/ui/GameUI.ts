@@ -410,6 +410,12 @@ export class GameUI {
         color: var(--fg-primary, #e8e8ec);
       }
 
+      .back-to-menu-btn.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
       /* 回合指示 */
       .turn-indicator {
         font-size: 1rem;
@@ -479,6 +485,12 @@ export class GameUI {
       .stats-toggle-btn:hover {
         background: rgba(61, 158, 255, 0.1);
         border-color: var(--accent-player, #3d9eff);
+      }
+
+      .stats-toggle-btn.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
       }
 
       /* 战绩面板 */
@@ -880,6 +892,30 @@ export class GameUI {
   hideStartHint(): void {
     if (this.startHintPanel) {
       this.startHintPanel.classList.add('hidden');
+    }
+  }
+
+  /**
+   * 设置HUD按钮是否可用
+   * @param enabled 是否启用
+   */
+  setButtonsEnabled(enabled: boolean): void {
+    if (this.backToMenuButton) {
+      (this.backToMenuButton as HTMLButtonElement).disabled = !enabled;
+      if (!enabled) {
+        this.backToMenuButton.classList.add('disabled');
+      } else {
+        this.backToMenuButton.classList.remove('disabled');
+      }
+    }
+
+    if (this.statsButton) {
+      (this.statsButton as HTMLButtonElement).disabled = !enabled;
+      if (!enabled) {
+        this.statsButton.classList.add('disabled');
+      } else {
+        this.statsButton.classList.remove('disabled');
+      }
     }
   }
 

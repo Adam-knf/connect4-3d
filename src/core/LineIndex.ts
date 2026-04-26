@@ -5,6 +5,7 @@
 
 import type { Position, Vector3, Player, WinResult, LineRecord } from '@/types';
 import { WIN_LINE_LENGTH } from '@/types';
+import { EVAL_SCORES } from '@/config/aiConfig';
 
 // 导出 LineRecord 类型（供外部使用）
 export type { LineRecord } from '@/types';
@@ -563,6 +564,30 @@ export class LineIndex {
   }
 
   /**
+   * 计算物理线的唯一标识（用于去重重叠段）
+   * 沿着方向反向走到棋盘边界，得到 canonical 起点
+   * 同一物理直线上的所有4连段共享同一个 key
+   */
+  static getPhysicalLineKey(line: LineRecord, width: number, height: number): string {
+    const dir = line.direction;
+    const firstPos = line.positions[0];
+    // 沿相反方向走到边界
+    let sx = firstPos.x;
+    let sy = firstPos.y;
+    let sz = firstPos.z;
+    while (
+      sx - dir.x >= 0 && sx - dir.x < width &&
+      sy - dir.y >= 0 && sy - dir.y < width &&
+      sz - dir.z >= 0 && sz - dir.z < height
+    ) {
+      sx -= dir.x;
+      sy -= dir.y;
+      sz -= dir.z;
+    }
+    return `${dir.x},${dir.y},${dir.z}:${sx},${sy},${sz}`;
+  }
+
+  /**
    * 获取评估分数（用于AI评估函数）
    * 区分"同时多威胁"和"非同时多威胁"
    * - 同时多威胁（多条线共享同一个空位）：正常累加
@@ -579,28 +604,40 @@ export class LineIndex {
     let opponentTwoInRow = 0;
     let opponentThreeInRow = 0;
 
+    // 物理线去重：同一物理直线上的重叠段只计1次
+    const seenPlayerLines = new Set<string>();
+    const seenOpponentLines = new Set<string>();
+
     for (const line of this.lines) {
       const playerCount = player === 'BLACK' ? line.blackCount : line.whiteCount;
       const opponentCount = player === 'BLACK' ? line.whiteCount : line.blackCount;
 
       // 己方威胁线
       if (opponentCount === 0 && playerCount > 0 && line.openEnds > 0) {
-        const lineScore = this.calculateLineScore(playerCount, line.openEnds, line.readyEnds, true);
-        const emptyPos = this.findEmptyPositionInLine(line);
-        playerThreats.push({ lineScore, emptyPos, count: playerCount });
+        const physKey = LineIndex.getPhysicalLineKey(line, this.width, this.height);
+        if (!seenPlayerLines.has(physKey)) {
+          seenPlayerLines.add(physKey);
+          const lineScore = this.calculateLineScore(playerCount, line.openEnds, line.readyEnds, true);
+          const emptyPos = this.findEmptyPositionInLine(line);
+          playerThreats.push({ lineScore, emptyPos, count: playerCount });
 
-        if (playerCount === 2) playerTwoInRow++;
-        if (playerCount === 3) playerThreeInRow++;
+          if (playerCount === 2) playerTwoInRow++;
+          if (playerCount === 3) playerThreeInRow++;
+        }
       }
 
       // 对方威胁线
       if (playerCount === 0 && opponentCount > 0 && line.openEnds > 0) {
-        const lineScore = this.calculateLineScore(opponentCount, line.openEnds, line.readyEnds, false);
-        const emptyPos = this.findEmptyPositionInLine(line);
-        opponentThreats.push({ lineScore, emptyPos, count: opponentCount });
+        const physKey = LineIndex.getPhysicalLineKey(line, this.width, this.height);
+        if (!seenOpponentLines.has(physKey)) {
+          seenOpponentLines.add(physKey);
+          const lineScore = this.calculateLineScore(opponentCount, line.openEnds, line.readyEnds, false);
+          const emptyPos = this.findEmptyPositionInLine(line);
+          opponentThreats.push({ lineScore, emptyPos, count: opponentCount });
 
-        if (opponentCount === 2) opponentTwoInRow++;
-        if (opponentCount === 3) opponentThreeInRow++;
+          if (opponentCount === 2) opponentTwoInRow++;
+          if (opponentCount === 3) opponentThreeInRow++;
+        }
       }
     }
 
@@ -611,10 +648,10 @@ export class LineIndex {
     let score = playerScore - opponentScore;
 
     // 多威胁叠加加分（2连、3连的特殊情况）
-    if (playerTwoInRow >= 2) score += 50 * (playerTwoInRow - 1);
-    if (opponentTwoInRow >= 2) score -= 200 * (opponentTwoInRow - 1);
-    if (playerThreeInRow >= 2) score += 500;
-    if (opponentThreeInRow >= 2) score -= 1000;
+    if (playerTwoInRow >= 2) score += EVAL_SCORES.POTENTIAL_DOUBLE_OWN * (playerTwoInRow - 1);
+    if (opponentTwoInRow >= 2) score -= EVAL_SCORES.POTENTIAL_DOUBLE_BLOCK * (opponentTwoInRow - 1);
+    if (playerThreeInRow >= 2) score += EVAL_SCORES.DOUBLE_THREAT_OWN;
+    if (opponentThreeInRow >= 2) score -= EVAL_SCORES.DOUBLE_THREAT_BLOCK;
 
     if (debug) {
       console.log(`[LineIndex Debug] 己方威胁线数=${playerThreats.length}, 得分=${playerScore}`);

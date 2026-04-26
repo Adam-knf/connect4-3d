@@ -142,6 +142,14 @@ class ConnectFour3D {
     this.gameUI?.updateDifficulty(difficulty);
     this.gameUI?.updateSteps(0);
 
+    // === 开场动画期间禁用所有交互 ===
+    // 禁用相机旋转/缩放
+    this.cameraController?.setEnabled(false);
+    // 禁用棋盘点击（InputHandler）
+    this.inputHandler?.disable();
+    // 禁用HUD按钮（返回菜单、战绩按钮）
+    this.gameUI?.setButtonsEnabled(false);
+
     // 准备游戏：设置棋盘，预计算先后手
     const isPlayerFirst = this.gameController.prepareGame(difficulty, order);
 
@@ -153,6 +161,11 @@ class ConnectFour3D {
 
     // 动画完成，隐藏提示
     this.gameUI?.hideStartHint();
+
+    // === 动画完成后启用交互 ===
+    this.cameraController?.setEnabled(true);
+    this.gameUI?.setButtonsEnabled(true);
+    // InputHandler 会在 beginGame 中根据游戏状态自动启用/禁用
 
     // 开始游戏逻辑（这会触发状态变化和启用输入）
     this.gameController.beginGame(isPlayerFirst);
@@ -230,15 +243,16 @@ class ConnectFour3D {
   restart(): void {
     if (!this.gameController) return;
 
-    console.log('[Game] Restarting...',this.gameController.getDifficulty());
-
-    // 先保存当前难度（restart会重置状态）
+    // 保存当前难度和先后手选择
     const currentDifficulty = this.gameController.getDifficulty();
+    const currentOrder = this.gameController.getPlayerOrder();
+
+    console.log(`[Game] Restarting... difficulty=${currentDifficulty}, order=${currentOrder}`);
 
     this.gameController.restart();
 
-    // 使用保存的难度开始新游戏
-    this.startGame(currentDifficulty, 'RANDOM');
+    // 使用保存的难度和先后手选择开始新游戏
+    this.startGame(currentDifficulty, currentOrder);
   }
 
   /**

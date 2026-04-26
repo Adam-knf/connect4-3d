@@ -561,6 +561,13 @@ export class GameController {
   }
 
   /**
+   * 获取玩家的先后手选择
+   */
+  getPlayerOrder(): Order {
+    return this.state.getPlayerOrder();
+  }
+
+  /**
    * 获取游戏用时
    */
   getElapsedTime(): number {

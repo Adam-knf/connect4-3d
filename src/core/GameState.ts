@@ -35,6 +35,9 @@ export interface GameStateData {
   /** 当前难度 */
   difficulty: Difficulty;
 
+  /** 玩家的先后手选择（FIRST/SECOND/RANDOM） */
+  playerOrder: Order;
+
   /** 玩家棋子类型 */
   playerPiece: Player;
 
@@ -84,6 +87,7 @@ export class GameState {
     return {
       currentState: 'MENU',
       difficulty: 'EASY',
+      playerOrder: 'RANDOM',  // 默认随机
       playerPiece: 'BLACK',
       aiPiece: 'WHITE',
       currentTurn: 'BLACK',
@@ -127,12 +131,15 @@ export class GameState {
   }
 
   /**
-   * 预计算先后手结果（不触发状态变化）
+   * 预计算先后手结果并保存选择
    * 用于开场动画显示提示
    * @param order 先后手选择
    * @returns 是否先手
    */
   determineOrder(order: Order): boolean {
+    // 保存玩家的先后手选择（用于再来一局）
+    this.data.playerOrder = order;
+
     if (order === 'FIRST') {
       return true;
     } else if (order === 'SECOND') {
@@ -173,6 +180,9 @@ export class GameState {
    * @param order 先后手选择
    */
   setOrder(order: Order): void {
+    // 保存玩家的先后手选择（用于再来一局）
+    this.data.playerOrder = order;
+
     if (order === 'FIRST') {
       this.data.playerPiece = 'BLACK';
       this.data.aiPiece = 'WHITE';
@@ -243,6 +253,13 @@ export class GameState {
    */
   getDifficulty(): Difficulty {
     return this.data.difficulty;
+  }
+
+  /**
+   * 获取玩家的先后手选择
+   */
+  getPlayerOrder(): Order {
+    return this.data.playerOrder;
   }
 
   /**
@@ -359,14 +376,16 @@ export class GameState {
    */
   restart(): void {
     const oldState = this.data.currentState;
-    // 保存当前难度
+    // 保存当前难度和先后手选择
     const currentDifficulty = this.data.difficulty;
-    console.log(`[GameState.restart] Preserving difficulty: ${currentDifficulty}`);
+    const currentPlayerOrder = this.data.playerOrder;
+    console.log(`[GameState.restart] Preserving difficulty: ${currentDifficulty}, order: ${currentPlayerOrder}`);
 
     this.data = this.createInitialState();
-    // 恢复难度
+    // 恢复难度和先后手选择
     this.data.difficulty = currentDifficulty;
-    console.log(`[GameState.restart] After restart, difficulty is: ${this.data.difficulty}`);
+    this.data.playerOrder = currentPlayerOrder;
+    console.log(`[GameState.restart] After restart, difficulty is: ${this.data.difficulty}, order: ${this.data.playerOrder}`);
 
     this.notifyStateChange('MENU', oldState);
   }

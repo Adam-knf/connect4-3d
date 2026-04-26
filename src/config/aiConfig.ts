@@ -17,7 +17,7 @@ import type { Difficulty, DifficultyConfig } from '@/types';
  */
 export const EVAL_SCORES = {
   // Layer 0: 立即胜负
-  WIN: 10000,           // 立即获胜 → 最高分
+  WIN: 100000,           // 立即获胜 → 最高分
   BLOCK_WIN: 5000,      // 阻挡对方获胜 → 高分
 
   // Layer 1: 基础威胁（3连）

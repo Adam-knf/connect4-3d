@@ -50,6 +50,9 @@ export class CameraController {
   /** 画布元素 */
   private canvas: HTMLCanvasElement;
 
+  /** 是否启用交互 */
+  private enabled: boolean;
+
   /** 绑定后的事件处理器引用（用于正确解绑） */
   private boundOnMouseDown: (event: MouseEvent) => void;
   private boundOnMouseMove: (event: MouseEvent) => void;
@@ -70,6 +73,7 @@ export class CameraController {
     this.boardHeight = boardHeight;
     this.isRotating = false;
     this.lastMousePos = { x: 0, y: 0 };
+    this.enabled = true;  // 默认启用
 
     // 保存绑定后的函数引用（用于正确解绑）
     this.boundOnMouseDown = this.onMouseDown.bind(this);
@@ -129,6 +133,7 @@ export class CameraController {
    * 鼠标按下
    */
   private onMouseDown(event: MouseEvent): void {
+    if (!this.enabled) return;  // 禁用时不响应
     // 只响应右键
     if (event.button === 2) {
       this.isRotating = true;
@@ -140,6 +145,7 @@ export class CameraController {
    * 鼠标移动
    */
   private onMouseMove(event: MouseEvent): void {
+    if (!this.enabled) return;  // 禁用时不响应
     if (!this.isRotating) return;
 
     const deltaX = event.clientX - this.lastMousePos.x;
@@ -182,6 +188,7 @@ export class CameraController {
    * - 90度物理转动 ≈ 6次点击 ≈ deltaY 600像素
    */
   private onWheel(event: WheelEvent): void {
+    if (!this.enabled) return;  // 禁用时不响应
     event.preventDefault();
 
     // deltaY 正值表示向下滚动（远离），负值表示向上滚动（拉近）
@@ -338,6 +345,25 @@ export class CameraController {
 
       requestAnimationFrame(animate);
     });
+  }
+
+  /**
+   * 设置是否启用交互
+   * @param enabled 是否启用
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      // 禁用时停止旋转
+      this.isRotating = false;
+    }
+  }
+
+  /**
+   * 是否启用交互
+   */
+  isEnabled(): boolean {
+    return this.enabled;
   }
 
   /**
