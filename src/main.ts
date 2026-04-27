@@ -1,17 +1,28 @@
 /**
  * 3D四子棋游戏入口文件
- * Phase 5 游戏流程整合 + Phase 6 UI层
+ * Phase 5 游戏流程整合 + Phase 6 UI层 + Phase 7 主题系统
  */
 
 import { SceneSetup } from '@/rendering/SceneSetup';
 import { BoardRenderer } from '@/rendering/BoardRenderer';
 import { CameraController } from '@/rendering/CameraController';
+import { EnvironmentRenderer } from '@/rendering/EnvironmentRenderer';
+import { PieceRenderer } from '@/rendering/PieceRenderer';
 import { InputHandler } from '@/ui/InputHandler';
 import { GameController, type UIUpdateCallback } from '@/core/GameController';
 import { StatsStore } from '@/core/StatsStore';
+import { ThemeManager } from '@/core/ThemeManager';
+import { ThemeLoader } from '@/core/ThemeLoader';
+import { AnimationController } from '@/core/AnimationController';
+import { PieceStateManager } from '@/core/PieceStateManager';
 import { GameUI } from '@/ui/GameUI';
 import { MenuUI } from '@/ui/MenuUI';
+import { ThemeSelectUI } from '@/ui/ThemeSelectUI';
+import { CLASSIC_THEME } from '@/config/themes/classicTheme';
+import { CAT_THEME } from '@/config/themes/catTheme';
+import { MECHA_THEME } from '@/config/themes/mechaTheme';
 import type { Difficulty, Order, GameResult, Player } from '@/types';
+import type { ThemeId, ThemeConfig } from '@/types/theme';
 import { BOARD_CONFIG } from '@/config/gameConfig';
 
 /**
@@ -31,6 +42,15 @@ class ConnectFour3D {
   private gameUI: GameUI | null = null;
   private menuUI: MenuUI | null = null;
 
+  // Phase 7 主题模块
+  private themeManager: ThemeManager | null = null;
+  private animationController: AnimationController | null = null;
+  private pieceStateManager: PieceStateManager | null = null;
+  private themeSelectUI: ThemeSelectUI | null = null;
+  private environmentRenderer: EnvironmentRenderer | null = null;
+  private pieceRenderer: PieceRenderer | null = null;
+  private themeLoader: ThemeLoader | null = null;
+
   /** 游戏结束回调引用（用于清理） */
   private gameEndCallback: ((result: GameResult, winner: Player | null) => void) | null = null;
 
@@ -40,7 +60,7 @@ class ConnectFour3D {
   /**
    * 初始化游戏
    */
-  init(): void {
+  async init(): Promise<void> {
     try {
       console.log('🎮 Connect Four 3D - Phase 6 UI Layer');
 
@@ -82,6 +102,54 @@ class ConnectFour3D {
       // 初始化游戏控制器（绑定输入回调）
       this.gameController.init();
 
+      // === Phase 7：主题系统初始化 ===
+      // 创建素材加载器
+      this.themeLoader = new ThemeLoader();
+
+      // 创建主题管理器
+      this.themeManager = new ThemeManager(this.themeLoader);
+      this.themeManager.registerTheme('CLASSIC', CLASSIC_THEME);
+      this.themeManager.registerTheme('CAT', CAT_THEME);
+      this.themeManager.registerTheme('MECHA', MECHA_THEME);
+
+      // 创建环境渲染器（管理背景+光照）
+      this.environmentRenderer = new EnvironmentRenderer();
+      this.environmentRenderer.init(scene);
+
+      // 创建棋子渲染器（GLB模型管理）
+      this.pieceRenderer = new PieceRenderer(this.themeLoader);
+
+      // 创建动画控制器
+      this.animationController = new AnimationController();
+      this.animationController.setTheme(CLASSIC_THEME); // 设置初始主题
+
+      // 创建棋子状态管理器
+      this.pieceStateManager = new PieceStateManager();
+
+      // 创建主题选择UI（需要ThemeManager参数）
+      this.themeSelectUI = new ThemeSelectUI(this.themeManager);
+      this.themeSelectUI.init();
+      this.themeSelectUI.onSelect((themeId) => {
+        this.switchTheme(themeId);
+      });
+
+      // 注册环境渲染器到ThemeManager（切换时自动调用applyTheme）
+      this.themeManager.onApplyTheme(async (theme: ThemeConfig) => {
+        await this.environmentRenderer?.applyTheme(theme);
+      });
+
+      // 集成到渲染循环
+      this.sceneSetup.setAnimationController(this.animationController);
+
+      // 集成到游戏控制器
+      this.gameController.setThemeManager(this.themeManager);
+      this.gameController.setPieceStateManager(this.pieceStateManager);
+      this.gameController.setAnimationController(this.animationController);
+
+      // 启动时加载默认主题（CLASSIC）- 应用背景/光照/棋盘颜色
+      await this.themeManager.setTheme('CLASSIC');
+      console.log('[Game] Default theme CLASSIC applied');
+
       // 设置菜单回调
       this.menuUI.setStartGameCallback((difficulty, order) => {
         this.startGame(difficulty, order);
@@ -95,6 +163,11 @@ class ConnectFour3D {
       // 设置再来一局回调
       this.gameUI.setRestartCallback(() => {
         this.restart();
+      });
+
+      // Phase 7：设置主题按钮回调
+      this.menuUI.setThemeSelectCallback(() => {
+        this.showThemeSelect();
       });
 
       // 注册游戏结束回调
@@ -300,6 +373,60 @@ class ConnectFour3D {
     return this.statsStore?.getStats();
   }
 
+  // ========== Phase 7：主题系统方法 ==========
+
+  /**
+   * 显示主题选择界面
+   */
+  showThemeSelect(): void {
+    console.log('[Game] Showing theme select...');
+    this.themeSelectUI?.show();
+  }
+
+  /**
+   * 切换主题
+   * @param themeId 主题ID
+   */
+  async switchTheme(themeId: ThemeId): Promise<void> {
+    if (!this.themeManager) return;
+
+    console.log(`[Game] Switching theme to: ${themeId}`);
+    const success = await this.themeManager.setTheme(themeId);
+
+    if (success) {
+      // 更新动画控制器
+      const theme = this.themeManager.getThemeConfig();
+      if (theme && this.animationController) {
+        this.animationController.setTheme(theme);
+      }
+
+      // 更新棋盘渲染器
+      if (theme && this.boardRenderer) {
+        await this.boardRenderer.applyTheme(theme);
+      }
+
+      // 更新棋子渲染器（GLB主题时需要重新初始化）
+      if (theme && this.pieceRenderer && this.sceneSetup) {
+        const scene = this.sceneSetup.getScene();
+        if (theme.id !== 'CLASSIC') {
+          // 猫咪/机甲主题使用GLB模型，需要初始化PieceRenderer
+          await this.pieceRenderer.init(scene, theme);
+        }
+      }
+
+      console.log(`[Game] Theme switched to ${themeId}`);
+    } else {
+      console.warn(`[Game] Theme switch failed`);
+    }
+  }
+
+  /**
+   * 获取当前主题（调试用）
+   */
+  getTheme(): string {
+    return this.themeManager?.currentTheme || 'CLASSIC';
+  }
+
   /**
    * 清理资源
    */
@@ -315,6 +442,13 @@ class ConnectFour3D {
     // 清理UI模块
     this.gameUI?.dispose();
     this.menuUI?.dispose();
+
+    // Phase 7：清理主题模块
+    this.themeSelectUI?.dispose();
+    this.animationController?.dispose();
+    this.pieceStateManager?.reset();
+    this.environmentRenderer?.dispose();
+    this.pieceRenderer?.clearAll();
 
     // 清理游戏模块
     this.gameController?.dispose();

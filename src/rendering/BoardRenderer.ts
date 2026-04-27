@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import type { Position, Player } from '@/types';
 import { BOARD_CONFIG, RENDER_CONFIG, PIECE_CONFIG } from '@/config/gameConfig';
+import type { ThemeConfig } from '@/types/theme';
 
 /**
  * 棋盘渲染器类
@@ -46,6 +47,28 @@ export class BoardRenderer {
 
   /** 棋子几何体 */
   private pieceGeometry: THREE.CylinderGeometry;
+
+  // ========== Phase 7 主题化属性 ==========
+
+  /** 当前主题配置 */
+  private currentTheme: ThemeConfig | null = null;
+
+  /** 主题化高亮颜色 */
+  private themeCellHighlightColor: number = RENDER_CONFIG.cellHighlight.color;
+  private themeVerticalLineColor: number = RENDER_CONFIG.verticalHighlight.color;
+  private themeVerticalLineOpacity: number = RENDER_CONFIG.verticalHighlight.opacity;
+  private themeVerticalLineEmissive: number = RENDER_CONFIG.verticalHighlight.emissiveIntensity;
+
+  /** 主题化预览棋子透明度 */
+  private themePreviewOpacity: number = PIECE_CONFIG.previewOpacity;
+
+  /** 主题化棋子颜色 */
+  private themeBlackPieceColor: number = RENDER_CONFIG.pieceBlack.color;
+  private themeWhitePieceColor: number = RENDER_CONFIG.pieceWhite.color;
+
+  /** 主题化棋子材质参数 */
+  private themePieceMetalness: number = 0.0;
+  private themePieceRoughness: number = 0.4;
 
   /**
    * 构造函数
@@ -356,10 +379,11 @@ export class BoardRenderer {
     const cellHeight = BOARD_CONFIG.cellHeight;
     const material = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
 
-    // 创建半透明预览棋子
+    // 创建半透明预览棋子（使用主题化透明度）
+    const previewOpacity = this.themePreviewOpacity;
     const previewMaterial = material.clone();
     previewMaterial.transparent = true;
-    previewMaterial.opacity = PIECE_CONFIG.previewOpacity;
+    previewMaterial.opacity = previewOpacity;
 
     const mesh = new THREE.Mesh(this.pieceGeometry, previewMaterial);
     mesh.position.set(
@@ -405,7 +429,11 @@ export class BoardRenderer {
 
     const cellSize = BOARD_CONFIG.cellSize;
     const cellHeight = BOARD_CONFIG.cellHeight;
-    const config = RENDER_CONFIG.cellHighlight;
+    // 使用主题化颜色（Phase 7）
+    const themeColors = this.getThemeHighlightColors();
+    const cellColor = themeColors.cellColor;
+    const cellOpacity = this.currentTheme?.board.highlight?.cellHighlight.opacity ?? RENDER_CONFIG.cellHighlight.opacity;
+    const cellEmissive = this.currentTheme?.board.highlight?.cellHighlight.emissiveIntensity ?? RENDER_CONFIG.cellHighlight.emissiveIntensity;
 
     // 创建高亮格子（更明显）
     const highlightGeometry = new THREE.BoxGeometry(
@@ -415,11 +443,11 @@ export class BoardRenderer {
     );
 
     const highlightMaterial = new THREE.MeshStandardMaterial({
-      color: config.color,
+      color: cellColor,
       transparent: true,
-      opacity: hasPreview ? config.opacity * 1.5 : config.opacity,
-      emissive: config.color,
-      emissiveIntensity: hasPreview ? config.emissiveIntensity * 1.5 : config.emissiveIntensity,
+      opacity: hasPreview ? cellOpacity * 1.5 : cellOpacity,
+      emissive: cellColor,
+      emissiveIntensity: hasPreview ? cellEmissive * 1.5 : cellEmissive,
     });
 
     const mesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
@@ -453,16 +481,20 @@ export class BoardRenderer {
 
     const cellSize = BOARD_CONFIG.cellSize;
     const cellHeight = BOARD_CONFIG.cellHeight;
-    const config = RENDER_CONFIG.verticalHighlight;
+    // 使用主题化颜色（Phase 7）
+    const themeColors = this.getThemeHighlightColors();
+    const verticalColor = themeColors.verticalColor;
+    const verticalOpacity = themeColors.verticalOpacity;
+    const verticalEmissive = themeColors.verticalEmissive;
 
     // 创建竖直网格线组
     this.verticalLines = new THREE.Group();
 
     // 竖直网格线材质（禁用深度测试避免被遮挡）
     const lineMaterial = new THREE.LineBasicMaterial({
-      color: config.color,
+      color: verticalColor,
       transparent: true,
-      opacity: config.opacity,
+      opacity: verticalOpacity,
       depthTest: false,
     });
 
@@ -502,11 +534,11 @@ export class BoardRenderer {
         cellSize
       );
       const targetHighlightMaterial = new THREE.MeshStandardMaterial({
-        color: config.color,
+        color: verticalColor,
         transparent: true,
-        opacity: config.opacity * 1.5,  // 更明显
-        emissive: config.color,
-        emissiveIntensity: config.emissiveIntensity * 1.5,
+        opacity: verticalOpacity * 1.5,  // 更明显
+        emissive: verticalColor,
+        emissiveIntensity: verticalEmissive * 1.5,
         depthTest: false,  // 禁用深度测试
       });
       const targetHighlight = new THREE.Mesh(targetHighlightGeometry, targetHighlightMaterial);
@@ -519,9 +551,9 @@ export class BoardRenderer {
 
       // 目标层水平边框（4条）
       const targetLineMaterial = new THREE.LineBasicMaterial({
-        color: config.color,
+        color: verticalColor,
         transparent: true,
-        opacity: config.opacity * 2,  // 更明显
+        opacity: verticalOpacity * 2,  // 更明显
         depthTest: false,
       });
 
@@ -557,11 +589,11 @@ export class BoardRenderer {
       cellSize
     );
     const topHighlightMaterial = new THREE.MeshStandardMaterial({
-      color: config.color,
+      color: verticalColor,
       transparent: true,
-      opacity: config.opacity * 0.5,
-      emissive: config.color,
-      emissiveIntensity: config.emissiveIntensity * 0.5,
+      opacity: verticalOpacity * 0.5,
+      emissive: verticalColor,
+      emissiveIntensity: verticalEmissive * 0.5,
     });
     const topHighlight = new THREE.Mesh(topHighlightGeometry, topHighlightMaterial);
     topHighlight.position.set(
@@ -796,5 +828,153 @@ export class BoardRenderer {
    */
   isHighlightEnabled(): boolean {
     return this.highlightEnabled;
+  }
+
+  // ========== Phase 7 主题化方法 ==========
+
+  /**
+   * 应用主题配置
+   * 从 ThemeConfig 读取棋盘材质颜色，替代硬编码 gameConfig
+   * @param theme 主题配置
+   */
+  applyTheme(theme: ThemeConfig): void {
+    console.log(`[BoardRenderer] Applying theme: ${theme.id}`);
+    this.currentTheme = theme;
+
+    // 应用棋盘底座颜色
+    if (theme.board.geometry) {
+      this.applyBaseGridTheme(theme.board.geometry.color, theme.board.geometry.opacity ?? 1.0);
+    }
+
+    // 应用网格颜色
+    this.applyGridLinesTheme(theme.board.grid.color, theme.board.grid.opacity);
+
+    // 应用高亮颜色
+    if (theme.board.highlight) {
+      this.themeCellHighlightColor = theme.board.highlight.cellHighlight.color;
+      this.themeVerticalLineColor = theme.board.highlight.verticalHighlight.color;
+      this.themeVerticalLineOpacity = theme.board.highlight.verticalHighlight.opacity;
+      this.themeVerticalLineEmissive = theme.board.highlight.verticalHighlight.emissiveIntensity;
+    }
+
+    // 应用预览棋子透明度
+    if (theme.board.highlight?.previewHighlight) {
+      this.themePreviewOpacity = theme.board.highlight.previewHighlight.opacity;
+    }
+
+    // 应用棋子颜色和材质参数
+    this.applyPieceTheme(theme);
+
+    console.log(`[BoardRenderer] Theme ${theme.id} applied`);
+  }
+
+  /**
+   * 应用底座网格主题
+   * @param color 底座颜色
+   * @param opacity 透明度
+   */
+  private applyBaseGridTheme(color: number, opacity: number): void {
+    console.log(`[BoardRenderer.applyBaseGridTheme] Applying color: #${color.toString(16)}, opacity: ${opacity}`);
+
+    // 更新底座面板材质
+    this.baseGrid.children.forEach((child) => {
+      if (child instanceof THREE.Mesh) {
+        const material = child.material as THREE.MeshStandardMaterial;
+
+        // 底座面板位置是负数（y = -cellHeight * 0.05）
+        if (child.position.y < 0) {
+          console.log(`[BoardRenderer] Updating base panel, current color: #${material.color.getHex().toString(16)}`);
+          material.color.setHex(color);
+          material.opacity = opacity;
+          material.needsUpdate = true;
+          console.log(`[BoardRenderer] Base panel color updated to: #${color.toString(16)}`);
+        }
+      }
+    });
+  }
+
+  /**
+   * 应用网格线框主题
+   * @param color 网格颜色
+   * @param opacity 网格透明度
+   */
+  private applyGridLinesTheme(color: number, opacity: number): void {
+    console.log(`[BoardRenderer.applyGridLinesTheme] Applying color: #${color.toString(16)}, opacity: ${opacity}`);
+
+    // 更新网格线材质
+    this.gridLines.children.forEach((child) => {
+      if (child instanceof THREE.Line) {
+        const material = child.material as THREE.LineBasicMaterial;
+        material.color.setHex(color);
+        material.opacity = opacity;
+        material.needsUpdate = true;
+      }
+    });
+
+    console.log(`[BoardRenderer] Grid lines updated`);
+  }
+
+  /**
+   * 应用棋子主题
+   * @param theme 主题配置
+   */
+  private applyPieceTheme(theme: ThemeConfig): void {
+    // 经典主题：使用几何体棋子
+    if (theme.pieces.black.geometry) {
+      this.themeBlackPieceColor = theme.pieces.black.geometry.color;
+      this.themePieceMetalness = theme.pieces.black.material?.metalness ?? 0.0;
+      this.themePieceRoughness = theme.pieces.black.material?.roughness ?? 0.4;
+    }
+
+    if (theme.pieces.white.geometry) {
+      this.themeWhitePieceColor = theme.pieces.white.geometry.color;
+    }
+
+    // 更新材质颜色和参数
+    this.blackPieceMaterial.color.setHex(this.themeBlackPieceColor);
+    this.blackPieceMaterial.metalness = this.themePieceMetalness;
+    this.blackPieceMaterial.roughness = this.themePieceRoughness;
+
+    this.whitePieceMaterial.color.setHex(this.themeWhitePieceColor);
+    this.whitePieceMaterial.metalness = this.themePieceMetalness;
+    this.whitePieceMaterial.roughness = this.themePieceRoughness;
+
+    // 更新已存在棋子的材质（需要克隆避免共享材质影响）
+    this.pieces.forEach((mesh) => {
+      const isBlack = (mesh.material as THREE.MeshStandardMaterial).color.getHex() === RENDER_CONFIG.pieceBlack.color;
+      // 更新为新的材质
+      mesh.material = isBlack ? this.blackPieceMaterial : this.whitePieceMaterial;
+    });
+  }
+
+  /**
+   * 获取当前主题配置
+   */
+  getCurrentTheme(): ThemeConfig | null {
+    return this.currentTheme;
+  }
+
+  /**
+   * 获取主题化高亮颜色（供 highlightColumn 使用）
+   */
+  getThemeHighlightColors(): {
+    cellColor: number;
+    verticalColor: number;
+    verticalOpacity: number;
+    verticalEmissive: number;
+  } {
+    return {
+      cellColor: this.themeCellHighlightColor,
+      verticalColor: this.themeVerticalLineColor,
+      verticalOpacity: this.themeVerticalLineOpacity,
+      verticalEmissive: this.themeVerticalLineEmissive,
+    };
+  }
+
+  /**
+   * 获取主题化预览棋子透明度
+   */
+  getThemePreviewOpacity(): number {
+    return this.themePreviewOpacity;
   }
 }

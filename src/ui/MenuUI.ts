@@ -59,6 +59,9 @@ export class MenuUI {
   /** 开始游戏回调 */
   private onStartGame: StartGameCallback | null = null;
 
+  /** 主题切换回调（Phase 7 新增） */
+  private onThemeSelect: (() => void) | null = null;
+
   /** 菜单面板 */
   private menuPanel: HTMLElement | null = null;
 
@@ -167,12 +170,18 @@ export class MenuUI {
     startButton.textContent = '开始游戏';
     startButton.onclick = () => this.handleStartGame();
 
+    const themeButton = document.createElement('button');
+    themeButton.className = 'menu-btn secondary-btn';
+    themeButton.textContent = '主题切换';
+    themeButton.onclick = () => this.handleThemeSelect();
+
     const statsButton = document.createElement('button');
     statsButton.className = 'menu-btn secondary-btn';
     statsButton.textContent = '查看战绩';
     statsButton.onclick = () => this.toggleStatsPanel();
 
     buttonsSection.appendChild(startButton);
+    buttonsSection.appendChild(themeButton);
     buttonsSection.appendChild(statsButton);
 
     // 组合布局
@@ -673,6 +682,27 @@ export class MenuUI {
    */
   setStartGameCallback(callback: StartGameCallback): void {
     this.onStartGame = callback;
+  }
+
+  // ========== Phase 7 主题集成方法 ==========
+
+  /**
+   * 处理主题切换按钮点击
+   */
+  private handleThemeSelect(): void {
+    console.log('[MenuUI] Theme button clicked');
+    if (this.onThemeSelect) {
+      this.onThemeSelect();
+    }
+  }
+
+  /**
+   * 设置主题切换回调
+   * @param callback 回调函数
+   */
+  setThemeSelectCallback(callback: () => void): void {
+    this.onThemeSelect = callback;
+    console.log('[MenuUI] Theme select callback registered');
   }
 
   /**

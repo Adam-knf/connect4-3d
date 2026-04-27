@@ -1,11 +1,11 @@
-# 任务拆解文档 v1.7
+# 任务拆解文档 v1.9
 
 ## 基本信息
 - **项目名称**：3D四子棋（Connect Four 3D）
 - **项目经理**：PM Agent
-- **文档版本**：v1.7
+- **文档版本**：v1.9
 - **创建日期**：2026-04-22
-- **更新日期**：2026-04-24
+- **更新日期**：2026-04-27
 - **前置依赖**：
   - requirements.md v1.4
   - architecture.md v1.3
@@ -17,6 +17,7 @@
   - test-handover-phase4.md v1.0 (Phase 4 验收)
   - qa-report-phase5-v1.2.md (Phase 5 Bug修复验收)
   - qa-report-phase6-v1.0.md (Phase 6 UI层验收)
+  - qa-report-phase7-v1.0.md (Phase 7 主题框架验收)
   - code-review-report.md v1.1 (架构师评审)
 
 ---
@@ -195,21 +196,21 @@ Phase 11: 验收与优化 [待开始]  ← 原Phase 9，重编号
 
 ---
 
-### Phase 7: 主题核心框架（P0功能）
+### Phase 7: 主题核心框架（P0功能） ⏳ 代码验收通过（待浏览器验证）
 
 | ID | 任务名称 | 优先级 | 角色 | Skill | 估时 | 依赖 | 状态 | 交付物 |
 |----|----------|--------|------|-------|------|------|------|--------|
-| T7-1 | 主题类型Schema定义：ThemeId, ThemeConfig, 各子配置类型 | P0 | dev | architect协助 | 2h | - | pending | src/types/theme.ts |
-| T7-2 | ThemeManager主题管理：主题配置管理、切换流程协调 | P0 | dev | architect协助 | 4h | T7-1 | pending | src/core/ThemeManager.ts |
-| T7-3 | ThemeLoader素材加载：GLB/GLTF模型、纹理、天空盒加载与缓存 | P0 | dev | architect协助 | 6h | T7-1 | pending | src/core/ThemeLoader.ts |
-| T7-4 | PieceStateManager状态管理：6状态机、状态转换表、棋子缓存 | P0 | dev | architect协助 | 6h | T7-1 | pending | src/core/PieceStateManager.ts |
-| T7-5 | AnimationController动画控制：循环动画、触发动画、己方/对方区分 | P0 | dev | architect协助 | 8h | T7-4 | pending | src/core/AnimationController.ts |
-| T7-6 | 改造PieceRenderer：素材驱动、Mesh池管理、姿态切换 | P0 | dev | threejs-game | 6h | T7-2, T7-3 | pending | src/rendering/PieceRenderer.ts |
-| T7-7 | 改造BoardRenderer：纹理贴图、材质颜色主题化 | P1 | dev | threejs-game | 3h | T7-2 | pending | src/rendering/BoardRenderer.ts |
-| T7-8 | EnvironmentRenderer环境渲染：背景、光照、天空盒 | P2 | dev | threejs-game | 4h | T7-2, T7-3 | pending | src/rendering/EnvironmentRenderer.ts |
-| T7-9 | ThemeSelectUI主题选择界面：预览、二次确认 | P1 | dev | frontend-design | 3h | T7-2 | pending | src/ui/ThemeSelectUI.ts |
+| T7-1 | 主题类型Schema定义：ThemeId, ThemeConfig, 各子配置类型 | P0 | dev | architect协助 | 2h | - | ✅ completed | src/types/theme.ts |
+| T7-2 | ThemeManager主题管理：主题配置管理、切换流程协调 | P0 | dev | architect协助 | 4h | T7-1 | ✅ completed | src/core/ThemeManager.ts |
+| T7-3 | ThemeLoader素材加载：GLB/GLTF模型、纹理、天空盒加载与缓存 | P0 | dev | architect协助 | 6h | T7-1 | ✅ completed | src/core/ThemeLoader.ts |
+| T7-4 | PieceStateManager状态管理：6状态机、状态转换表、棋子缓存 | P0 | dev | architect协助 | 6h | T7-1 | ✅ completed | src/core/PieceStateManager.ts |
+| T7-5 | AnimationController动画控制：循环动画、触发动画、己方/对方区分 | P0 | dev | architect协助 | 8h | T7-4 | ✅ completed | src/core/AnimationController.ts |
+| T7-6 | 改造PieceRenderer：素材驱动、Mesh池管理、姿态切换 | P0 | dev | threejs-game | 6h | T7-2, T7-3 | ✅ completed | src/rendering/PieceRenderer.ts |
+| T7-7 | 改造BoardRenderer：纹理贴图、材质颜色主题化 | P1 | dev | threejs-game | 3h | T7-2 | ✅ completed | src/rendering/BoardRenderer.ts |
+| T7-8 | EnvironmentRenderer环境渲染：背景、光照、天空盒 | P2 | dev | threejs-game | 4h | T7-2, T7-3 | ✅ completed | src/rendering/EnvironmentRenderer.ts |
+| T7-9 | ThemeSelectUI主题选择界面：预览、二次确认 | P1 | dev | frontend-design | 3h | T7-2 | ✅ completed | src/ui/ThemeSelectUI.ts |
 
-**里程碑 M7**：主题核心框架完成，经典主题可运行，接口完备
+**里程碑 M7**：⏳ 代码验收通过 - 经典主题框架完成，接口完备，待浏览器验证
 
 **Phase 7 工时总计：48h（约 5-6 个工作日）**
 
@@ -281,7 +282,7 @@ Phase 11: 验收与优化 [待开始]  ← 原Phase 9，重编号
 | M4 | AI系统 | 三种难度AI可对战，响应≤3秒 | ✅ 已达成 |
 | M5 | 游戏流程整合 | GameController完成，QA验收通过 | ⏳ 部分达成（AI评估问题单独处理） |
 | M6 | UI层 | HUD面板、主菜单、战绩记录展示 | ✅ 已达成 |
-| M7 | 主题核心框架 | 经典主题可运行，接口完备，60fps | 待开始 |
+| M7 | 主题核心框架 | 经典主题可运行，接口完备，60fps | ⏳ 代码验收通过（待浏览器验证） |
 | M8 | 猫咪主题 | 猫咪主题动画生效，呼吸节律流畅 | 待开始 |
 | M9 | 机甲主题 | 全部三套主题可切换，动画流畅 | 待开始 |
 | M10 | 视觉特效 | 胜负特效、粒子效果流畅播放 | 待开始 |
@@ -303,7 +304,7 @@ T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 →
 - T3-1 BoardRenderer（核心渲染）✅
 - T4-1 AIPlayer（核心游戏体验）✅
 - T5-1 GameController（核心流程控制）✅
-- T7-5 AnimationController（主题动画核心）← 下一优先
+- T7-5 AnimationController（主题动画核心）✅ ← 已完成
 
 ---
 
@@ -341,6 +342,9 @@ T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 →
 | PieceStateManager状态冲突 | 中 | 中 | 状态转换表 + 单元测试 |
 | 多主题素材加载时间长 | 中 | 低 | 预加载 + 缓存 + 加载进度提示 |
 | 素材内存占用过大 | 低 | 中 | 控制模型大小，单主题≤10MB |
+| GLB模型动画参数不兼容 | 中 | 高 | AnimationController 参数校验 + fallback 动画 |
+| 主题切换内存泄漏 | 中 | 中 | 切换100次后内存/GPU资源检查 |
+| PieceStateManager状态转换遗漏 | 低 | 高 | 单元测试覆盖所有状态转换路径 |
 
 ---
 
@@ -391,12 +395,24 @@ T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 →
 - [x] 战绩数据正确记录
 - [x] 战绩正确展示
 
-### Phase 7验收（主题核心框架 P0功能）
-- [ ] 主菜单可切换主题，二次确认后生效
-- [ ] 经典主题棋子正确渲染
+### Phase 7验收（主题核心框架 P0功能） ⏳ 代码验收通过
+- [ ] 主菜单可切换主题，二次确认后生效 ⏳ 待浏览器验证
+  - 测试方法：菜单点击切换 → 弹窗确认 → 确认后主题生效
+  - 代码检查：✅ MenuUI有主题按钮，ThemeSelectUI有二次确认弹窗
+- [ ] 经典主题棋子正确渲染 ⏳ 待浏览器验证
+  - 测试方法：材质颜色与 visual-style-guide.md 设计稿一致，光照效果正确
+  - 代码检查：✅ PieceRenderer支持CLASSIC主题，CylinderGeometry材质已实现
 - [ ] 素材加载失败时 fallback 到经典主题
-- [ ] 主题类型Schema完整，接口完备
-- [ ] 动画流畅，60fps
+  - 测试方法：故意删除素材文件，启动游戏验证 fallback 行为，控制台有警告日志
+  - 代码检查：✅ ThemeManager.ts:103-110 fallback机制完整
+- [x] 主题类型Schema完整，接口完备
+  - 测试方法：TypeScript编译通过，无类型错误
+  - 验证结果：✅ npm run build成功，33模块编译通过
+- [ ] 动画流畅，60fps ⏳ 待浏览器验证
+  - 测试方法：连续5局游戏，每局记录帧率日志，最低帧率≥50fps
+- [ ] 主题切换无内存泄漏 ⏳ 待浏览器验证
+  - 测试方法：切换主题100次，浏览器内存占用增长≤10MB
+  - 代码检查：✅ ThemeManager.dispose()和ThemeLoader.clearCache()存在
 
 ### Phase 8验收（猫咪主题 P1功能）
 - [ ] 猫咪主题棋子正确渲染
@@ -442,33 +458,30 @@ T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 →
 - [x] Phase 4 开发验收通过（test-handover-phase4.md v1.0）
 - [x] Phase 5 QA验收通过（qa-report-phase5-v1.2.md）
 - [x] Phase 6 QA验收通过（qa-report-phase6-v1.0）
+- [x] Phase 7 QA代码验收通过（qa-report-phase7-v1.0.md） ⏳ 待浏览器验证
 - [x] 架构师代码评审通过（code-review-report.md v1.1）
-- [ ] AI评估算法优化待处理（单独任务）
-- [ ] Phase 7-9 主题系统待开发
+- [ ] AI评估算法优化待处理（单独任务，Phase 11）
+- [ ] Phase 8-9 猫咪/机甲主题素材准备
 - [ ] Phase 10-11 待开发
 - [ ] 禁止后续修改（除非正式变更流程）
 
 ---
 
-**版本**：v1.7
-**最后更新**：2026-04-24（Phase 7 拆分为核心框架/猫咪/机甲三个阶段，Phase 8/9 重编号为 Phase 10/11）
+**版本**：v1.9
+**最后更新**：2026-04-27（Phase 7 代码验收通过，更新任务状态）
 
 ---
 
 ## 下一步行动
 
-1. **当前进度**：Phase 1-6 已完成，里程碑 M1-M5（部分）、M6 已达成
-2. **下一优先**：Phase 7 主题系统开发
+1. **当前进度**：Phase 1-7 已完成（代码验收），里程碑 M1-M6 ✅，M7 ⏳
+2. **下一优先**：Phase 8 猫咪主题素材准备（GLB模型 + Blender动画制作）
 3. **建议执行顺序**：
-   - Phase 7 核心框架：`/architect` + `/dev` 协作完成 T7-1~T7-5
-   - 渲染器改造：`/dev` + `threejs-game` skill 完成 T7-6~T7-8
-   - 主题配置：`/dev` + `frontend-design` skill 完成 T7-9
-   - 猫咪主题：`/dev` 完成 T8-1~T8-2（依赖 Phase 7）
-   - 机甲主题：`/dev` 完成 T9-1~T9-2（依赖 Phase 7）
-   - 素材获取（T8-1, T9-1）并行进行，不阻塞核心开发
-4. **Phase 10 范围调整说明**：
-   - 原 Phase 7 中胜负动画、悬停互动、下落/对抗动画、呼吸节律等功能
-   - 已整体迁移至 Phase 7 主题系统
+   - 猫咪素材：使用 Blender 制作 Idle/Hover 动画（参考 docs/design/blender-animation-guide.md）
+   - 猫咪配置：T8-2 猫咪主题配置
+   - 机甲素材：T9-1 获取机甲素材
+   - 机甲配置：T9-2 机甲主题配置
+4. **浏览器验证**：启动游戏验证 Phase 7 主题切换流程、帧率、内存
    - 新 Phase 10 仅专注视觉增强：连线高亮、棋盘旋转展示、粒子特效
 5. **验收凭证**：
    - Phase 1: docs/qa/qa-report.md (项目骨架)

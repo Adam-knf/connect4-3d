@@ -2,15 +2,20 @@
  * GameController 游戏流程控制
  * 协调 GameState、Board、AIPlayer、BoardRenderer、InputHandler
  * 实现完整游戏流程
+ * Phase 7 新增：PieceStateManager、AnimationController集成
  */
 
 import { GameState, StateCallback } from './GameState';
 import { Board } from './Board';
 import { AIPlayer } from './AIPlayer';
+import { ThemeManager } from './ThemeManager';
+import { PieceStateManager } from './PieceStateManager';
+import { AnimationController } from './AnimationController';
 import { BoardRenderer } from '@/rendering/BoardRenderer';
 import { CameraController } from '@/rendering/CameraController';
 import { InputHandler } from '@/ui/InputHandler';
 import type { GameStateType, Difficulty, Order, Player, WinResult, GameResult } from '@/types';
+import type { ThemeId, ThemeConfig, PieceEvent } from '@/types/theme';
 import { BOARD_CONFIG } from '@/config/gameConfig';
 
 /**
@@ -47,6 +52,15 @@ export class GameController {
   /** AI玩家 */
   private ai: AIPlayer;
 
+  /** 主题管理器 */
+  private themeManager: ThemeManager | null = null;
+
+  /** 棋子状态管理器（Phase 7） */
+  private pieceStateManager: PieceStateManager | null = null;
+
+  /** 动画控制器（Phase 7） */
+  private animationController: AnimationController | null = null;
+
   // ========== 渲染模块 ==========
 
   /** 棋盘渲染器 */
@@ -68,6 +82,9 @@ export class GameController {
 
   /** UI更新回调 */
   private uiUpdateCallbacks: UIUpdateCallback[] = [];
+
+  /** 上一次悬停位置（Phase 7，用于触发HOVER_END） */
+  private lastHoverPos: { x: number; y: number; z: number } | null = null;
 
   /** 状态变化回调引用（用于清理） */
   private stateCallback: StateCallback;
@@ -309,6 +326,19 @@ export class GameController {
     // 记录步数
     this.state.recordMove(result.pos);
 
+    // Phase 7：触发棋子状态变更事件
+    if (this.pieceStateManager) {
+      // 下层棋子被覆盖 → COVERED事件
+      if (result.pos.z > 0) {
+        const belowPos = { x: result.pos.x, y: result.pos.y, z: result.pos.z - 1 };
+        if (this.board.getPiece(belowPos) !== 'EMPTY') {
+          this.pieceStateManager.processEvent(belowPos, 'COVERED');
+        }
+      }
+      // 本棋子 → FALL事件（动画结束后会转为IDLE）
+      this.pieceStateManager.setState(result.pos, 'IDLE'); // 新棋子初始状态
+    }
+
     // 渲染棋子（带下落动画）
     this.boardRenderer.addPiece(result.pos, playerPiece).animation.then(() => {
       console.log('[GameController] Player drop animation complete, checking game state...');
@@ -398,6 +428,19 @@ export class GameController {
 
     console.log(`[GameController] Game end: ${result}, winner: ${winResult.winner}`);
 
+    // Phase 7：触发胜负状态事件
+    if (this.pieceStateManager) {
+      // 对所有棋子触发胜负事件（当前简化处理，后续需要根据棋子玩家过滤）
+      const winEvent: PieceEvent = isPlayerWin ? 'GAME_WIN' : 'GAME_LOSE';
+      this.pieceStateManager.processEventForAll(winEvent);
+    }
+
+    // Phase 7：播放胜负动画（TODO: 需PieceRenderer集成后才能获取PieceMesh列表）
+    // if (this.animationController) {
+    //   const pieces = this.pieceRenderer.getAllPieceMeshes();
+    //   this.animationController.setAllPiecesForWinLose(pieces, playerPiece);
+    // }
+
     // 显示胜利连线高亮
     if (isPlayerWin) {
       this.boardRenderer.showWinLine(winResult.linePositions);
@@ -449,6 +492,8 @@ export class GameController {
     if (!this.state.isPlayerTurn()) {
       this.boardRenderer.clearPreviewPiece();
       this.boardRenderer.clearHighlight();
+      // Phase 7：触发HOVER_END（如果有上次悬停位置）
+      this.triggerHoverEnd();
       return;
     }
 
@@ -456,6 +501,8 @@ export class GameController {
       // 鼠标移出棋盘
       this.boardRenderer.clearPreviewPiece();
       this.boardRenderer.clearHighlight();
+      // Phase 7：触发HOVER_END
+      this.triggerHoverEnd();
       return;
     }
 
@@ -465,8 +512,13 @@ export class GameController {
       // 该列已满
       this.boardRenderer.clearPreviewPiece();
       this.boardRenderer.highlightColumn(x, y, undefined, false);
+      // Phase 7：触发HOVER_END
+      this.triggerHoverEnd();
       return;
     }
+
+    // Phase 7：触发HOVER_START（下方棋子）
+    this.triggerHoverStart(x, y, z);
 
     // 显示预览棋子
     const playerPiece = this.state.getPlayerPiece();
@@ -474,6 +526,38 @@ export class GameController {
 
     // 高亮列
     this.boardRenderer.highlightColumn(x, y, z, true);
+  }
+
+  /**
+   * 触发悬停开始事件（Phase 7）
+   * @param x X坐标
+   * @param y Y坐标
+   * @param z 落点高度
+   */
+  private triggerHoverStart(x: number, y: number, z: number): void {
+    if (!this.pieceStateManager) return;
+
+    // 先触发上次位置的HOVER_END
+    this.triggerHoverEnd();
+
+    // 如果下方有棋子，触发HOVER_START
+    if (z > 0) {
+      const belowPos = { x, y, z: z - 1 };
+      if (this.board.getPiece(belowPos) !== 'EMPTY') {
+        this.pieceStateManager.processEvent(belowPos, 'HOVER_START');
+        this.lastHoverPos = belowPos;
+      }
+    }
+  }
+
+  /**
+   * 触发悬停结束事件（Phase 7）
+   */
+  private triggerHoverEnd(): void {
+    if (!this.pieceStateManager || !this.lastHoverPos) return;
+
+    this.pieceStateManager.processEvent(this.lastHoverPos, 'HOVER_END');
+    this.lastHoverPos = null;
   }
 
   /**
@@ -583,6 +667,18 @@ export class GameController {
    */
   restart(): void {
     console.log(`[GameController.restart] Before restart, difficulty: ${this.state.getDifficulty()}`);
+
+    // Phase 7：触发GAME_RESET事件（清除胜负状态）
+    if (this.pieceStateManager) {
+      this.pieceStateManager.processEventForAll('GAME_RESET');
+      this.pieceStateManager.reset();
+    }
+
+    // Phase 7：清除所有动画
+    if (this.animationController) {
+      this.animationController.clearAllAnimations();
+    }
+
     this.state.restart();
     console.log(`[GameController.restart] After restart, difficulty: ${this.state.getDifficulty()}`);
 
@@ -598,6 +694,66 @@ export class GameController {
   backToMenu(): void {
     console.log('[GameController] Back to menu...');
     this.state.backToMenu();
+  }
+
+  /**
+   * 设置主题管理器
+   * @param themeManager 主题管理器实例
+   */
+  setThemeManager(themeManager: ThemeManager): void {
+    this.themeManager = themeManager;
+    console.log('[GameController] ThemeManager set');
+  }
+
+  /**
+   * 设置棋子状态管理器（Phase 7）
+   * @param pieceStateManager 棋子状态管理器实例
+   */
+  setPieceStateManager(pieceStateManager: PieceStateManager): void {
+    this.pieceStateManager = pieceStateManager;
+    console.log('[GameController] PieceStateManager set');
+  }
+
+  /**
+   * 设置动画控制器（Phase 7）
+   * @param animationController 动画控制器实例
+   */
+  setAnimationController(animationController: AnimationController): void {
+    this.animationController = animationController;
+    console.log('[GameController] AnimationController set');
+  }
+
+  /**
+   * 切换主题
+   * @param themeId 主题ID
+   * @returns 切换是否成功
+   */
+  async setTheme(themeId: ThemeId): Promise<boolean> {
+    if (!this.themeManager) {
+      console.warn('[GameController] ThemeManager not set, cannot change theme');
+      return false;
+    }
+
+    console.log(`[GameController] Setting theme: ${themeId}`);
+    const success = await this.themeManager.setTheme(themeId);
+
+    if (success) {
+      // 更新棋盘渲染器
+      const theme = this.themeManager.getThemeConfig();
+      if (theme) {
+        await this.boardRenderer.applyTheme(theme);
+      }
+    }
+
+    return success;
+  }
+
+  /**
+   * 获取当前主题配置
+   * @returns 当前主题配置或null
+   */
+  getTheme(): ThemeConfig | null {
+    return this.themeManager?.getThemeConfig() ?? null;
   }
 
   /**

@@ -1,10 +1,12 @@
 /**
  * Three.js场景初始化
  * 创建Scene、Camera、Renderer、光照
+ * Phase 7 新增：AnimationController集成点
  */
 
 import * as THREE from 'three';
 import { CAMERA_CONFIG, LIGHT_CONFIG } from '@/config/gameConfig';
+import type { AnimationController } from '@/core/AnimationController';
 
 /**
  * 场景初始化类
@@ -14,6 +16,12 @@ export class SceneSetup {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private container: HTMLElement;
+
+  /** 动画控制器（Phase 7） */
+  private animationController: AnimationController | null = null;
+
+  /** 上一次更新时间（用于计算deltaTime） */
+  private lastTime: number = 0;
 
   constructor(containerId: string) {
     this.container = document.getElementById(containerId) || document.body;
@@ -174,9 +182,21 @@ export class SceneSetup {
 
   /**
    * 渲染循环
+   * Phase 7 新增：调用 AnimationController.updateAllIdle()
    */
   private animate(): void {
     requestAnimationFrame(() => this.animate());
+
+    // 计算deltaTime
+    const currentTime = performance.now();
+    const deltaTime = currentTime - this.lastTime;
+    this.lastTime = currentTime;
+
+    // 更新动画控制器（呼吸动画等）
+    if (this.animationController) {
+      this.animationController.updateAllIdle(deltaTime);
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -206,6 +226,15 @@ export class SceneSetup {
    */
   getCanvas(): HTMLCanvasElement {
     return this.renderer.domElement;
+  }
+
+  /**
+   * 设置动画控制器（Phase 7）
+   * @param controller 动画控制器实例
+   */
+  setAnimationController(controller: AnimationController): void {
+    this.animationController = controller;
+    console.log('[SceneSetup] AnimationController set');
   }
 
   /**

@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cat Model Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      font-family: 'DM Sans', sans-serif;
+      color: #e8e8ec;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* 顶部：动画按钮 */
+    #top-bar {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #2a2a3a;
+      border-bottom: 1px solid #3a3a4a;
+    }
+    #top-bar label { color: #8888a0; font-size: 14px; }
+    #anim-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .anim-btn {
+      padding: 8px 16px;
+      background: #3a3a4a;
+      border: 1px solid #4a4a5a;
+      border-radius: 6px;
+      color: #8888a0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .anim-btn:hover { background: #4a4a5a; color: #e8e8ec; }
+    .anim-btn.active, .anim-btn.custom-anim.active {
+      background: #3d9eff;
+      border-color: #3d9eff;
+      color: white;
+    }
+    .anim-btn.stop:hover { background: #ff8b6a; }
+    #anim-info {
+      margin-left: auto;
+      color: #8888a0;
+      font-size: 12px;
+    }
+
+    /* 中间：3D模型展示区域 */
+    #canvas-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #0a0a0f;
+    }
+    #canvas-container canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 右侧：颜色按钮 */
+    #side-bar {
+      position: fixed;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #2a2a3a;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #3a3a4a;
+    }
+    #side-bar label {
+      color: #8888a0;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .color-btn {
+      width: 50px;
+      height: 50px;
+      border-radius: 8px;
+      border: 2px solid #4a4a5a;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #8888a0;
+    }
+    .color-btn:hover { border-color: #5a5a6a; }
+    .color-btn.active { border-color: #3d9eff; }
+    .color-black { background: #1a1a22; }
+    .color-white { background: #f0e8d8; color: #1a1a22; }
+    .color-orange { background: #ff6b4a; color: white; }
+    .color-blue { background: #3d9eff; color: white; }
+    .color-green { background: #4ade80; color: white; }
+    .color-pink { background: #ff99aa; color: white; }
+
+    /* 底部：模型切换按钮 */
+    #bottom-bar {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #2a2a3a;
+      border-top: 1px solid #3a3a4a;
+    }
+    #bottom-bar label { color: #8888a0; font-size: 14px; }
+    #model-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .model-btn {
+      padding: 12px 20px;
+      background: #3a3a4a;
+      border: 1px solid #4a4a5a;
+      border-radius: 6px;
+      color: #8888a0;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .model-btn:hover { background: #4a4a5a; color: #e8e8ec; }
+    .model-btn.active {
+      background: #3d9eff;
+      border-color: #3d9eff;
+      color: white;
+    }
+    #model-info {
+      margin-left: auto;
+      color: #8888a0;
+      font-size: 12px;
+    }
+
+    /* 加载提示 */
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #2a2a3a;
+      padding: 20px 40px;
+      border-radius: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部：动画按钮 -->
+  <div id="top-bar">
+    <label>内置动画:</label>
+    <div id="anim-buttons"></div>
+    <span id="anim-info">--</span>
+    <div style="border-left: 1px solid #4a4a5a; margin-left: 16px; padding-left: 16px;">
+      <label>自定义动画:</label>
+      <div id="custom-anim-buttons">
+        <button class="anim-btn custom-anim" data-type="idle">呼吸</button>
+        <button class="anim-btn custom-anim" data-type="fall">下落</button>
+        <button class="anim-btn custom-anim" data-type="hover">悬停</button>
+        <button class="anim-btn custom-anim" data-type="sleep">趴睡</button>
+        <button class="anim-btn custom-anim" data-type="win">胜利</button>
+        <button class="anim-btn custom-anim" data-type="lose">失败</button>
+        <button class="anim-btn custom-anim stop" data-type="stop" style="background:#ff6b4a;">停止</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中间：3D模型 -->
+  <div id="canvas-container"></div>
+
+  <!-- 右侧：颜色按钮 -->
+  <div id="side-bar">
+    <label>颜色</label>
+    <button class="color-btn color-black active" data-color="0x1a1a22" title="黑猫">黑</button>
+    <button class="color-btn color-white" data-color="0xf0e8d8" title="白猫">白</button>
+    <button class="color-btn color-orange" data-color="0xff6b4a" title="橘猫">橘</button>
+    <button class="color-btn color-blue" data-color="0x3d9eff" title="蓝">蓝</button>
+    <button class="color-btn color-green" data-color="0x4ade80" title="绿">绿</button>
+    <button class="color-btn color-pink" data-color="0xff99aa" title="粉">粉</button>
+  </div>
+
+  <!-- 底部：模型切换 -->
+  <div id="bottom-bar">
+    <label>模型:</label>
+    <div id="model-buttons">
+      <button class="model-btn active" data-model="black_cat.glb">black_cat</button>
+      <button class="model-btn" data-model="lucky_cat_with_animation_cute_maneki_neko.glb">lucky_cat</button>
+      <button class="model-btn" data-model="toon_cat_free.glb">toon_cat</button>
+    </div>
+    <span id="model-info">加载中...</span>
+  </div>
+
+  <!-- 加载提示 -->
+  <div id="loading">加载中...</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // === 状态管理 ===
+    const state = {
+      currentModel: 'black_cat.glb',
+      currentAnim: 0,
+      currentColor: 0x1a1a22,
+      loadedModel: null,
+      animations: [],
+      mixer: null,
+      // 自定义动画状态
+      customAnim: null,
+      customAnimType: 'none'
+    };
+
+    // === Three.js 初始化 ===
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / (window.innerHeight - 120), 0.1, 100);
+    camera.position.set(2, 2, 3);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 0, 0);
+
+    // 光照
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+    directional.position.set(5, 10, 5);
+    scene.add(directional);
+    const fill = new THREE.DirectionalLight(0x3d9eff, 0.3);
+    fill.position.set(-5, 5, -5);
+    scene.add(fill);
+
+    // === 模型加载 ===
+    const loader = new GLTFLoader();
+    const modelBasePath = '/game/connect4/assets/testcat/';
+
+    function loadModel(modelName) {
+      document.getElementById('loading').style.display = 'block';
+
+      // 清除旧模型
+      if (state.loadedModel) {
+        scene.remove(state.loadedModel);
+        state.loadedModel.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+      }
+      if (state.mixer) {
+        state.mixer.stopAllAction();
+        state.mixer = null;
+      }
+      state.animations = [];
+
+      // 停止自定义动画
+      state.customAnim = null;
+      state.customAnimType = 'none';
+
+      loader.load(modelBasePath + modelName, (gltf) => {
+        const obj = gltf.scene;
+        state.loadedModel = obj;
+
+        // 居中并缩放，同时调整相机位置
+        const box = new THREE.Box3().setFromObject(obj);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 2 / maxDim;
+        obj.scale.multiplyScalar(scale);
+        obj.position.sub(center.multiplyScalar(scale));
+
+        // 保存基础缩放值供自定义动画使用
+        obj.userData.baseScale = obj.scale.x;
+
+        // 重置模型状态（模型中心在地面）
+        obj.position.set(0, 0, 0);
+        obj.rotation.set(0, 0, 0);
+
+        // 保存所有骨骼的初始旋转值
+        obj.traverse(child => {
+          if (child.isBone || (child.type === 'Object3D' && child.name)) {
+            child.userData.initialRot = {
+              x: child.rotation.x,
+              y: child.rotation.y,
+              z: child.rotation.z
+            };
+          }
+        });
+
+        // 重置相机位置（缩放后模型尺寸约2，相机距离固定3-4）
+        camera.position.set(3, 2, 3);
+        controls.target.set(0, 0, 0);
+        controls.update();
+
+        // 应用当前颜色
+        applyColor(state.currentColor);
+
+        scene.add(obj);
+
+        // 处理动画
+        if (gltf.animations && gltf.animations.length > 0) {
+          state.mixer = new THREE.AnimationMixer(obj);
+          gltf.animations.forEach(clip => {
+            state.animations.push({
+              clip,
+              name: clip.name || 'anim_' + state.animations.length,
+              action: state.mixer.clipAction(clip)
+            });
+          });
+
+          // 创建动画按钮
+          updateAnimButtons();
+          playAnimation(0);
+        } else {
+          updateAnimButtons();
+        }
+
+        // 重置自定义动画按钮状态
+        updateCustomAnimButtons('none');
+
+        // 更新模型信息
+        const fileSize = Math.round(fetch(modelBasePath + modelName).then(r => r.headers.get('content-length')));
+        document.getElementById('model-info').innerHTML =
+          `已加载: ${modelName}<br>动画: ${state.animations.length} | 网格: ${gltf.scene.children.length}`;
+
+        document.getElementById('loading').style.display = 'none';
+
+      }, undefined, (error) => {
+        console.error(error);
+        document.getElementById('model-info').innerHTML = '加载失败: ' + error.message;
+        document.getElementById('loading').style.display = 'none';
+      });
+    }
+
+    function updateAnimButtons() {
+      const animButtonsDiv = document.getElementById('anim-buttons');
+      animButtonsDiv.innerHTML = '';
+
+      if (state.animations.length === 0) {
+        animButtonsDiv.innerHTML = '<span style="color:#8888a0">无内置动画</span>';
+        document.getElementById('anim-info').innerHTML = '使用自定义动画';
+        return;
+      }
+
+      state.animations.forEach((anim, index) => {
+        const btn = document.createElement('button');
+        btn.className = 'anim-btn' + (index === state.currentAnim ? ' active' : '');
+        btn.textContent = anim.name.substring(0, 25);
+        btn.onclick = () => playAnimation(index);
+        animButtonsDiv.appendChild(btn);
+      });
+
+      document.getElementById('anim-info').innerHTML =
+        `共 ${state.animations.length} 个内置动画`;
+    }
+
+    function playAnimation(index) {
+      if (state.animations.length === 0) return;
+
+      state.currentAnim = index;
+      const anim = state.animations[index];
+
+      // 停止所有动画，播放选中的
+      state.animations.forEach(a => a.action.stop());
+      anim.action.reset().play();
+
+      // 更新按钮状态
+      const btns = document.querySelectorAll('.anim-btn');
+      btns.forEach((btn, i) => btn.classList.toggle('active', i === index));
+    }
+
+    function applyColor(colorHex) {
+      state.currentColor = colorHex;
+      if (!state.loadedModel) return;
+
+      state.loadedModel.traverse(child => {
+        if (child.isMesh && child.material) {
+          // 克隆材质避免影响原模型
+          if (!child.material._customized) {
+            child.material = child.material.clone();
+            child.material._customized = true;
+          }
+          child.material.color.setHex(colorHex);
+          // 保持金属感/粗糙度
+          child.material.metalness = 0.0;
+          child.material.roughness = 0.6;
+        }
+      });
+
+      // 更新颜色按钮状态
+      const btns = document.querySelectorAll('.color-btn');
+      btns.forEach(btn => {
+        const btnColor = parseInt(btn.dataset.color);
+        btn.classList.toggle('active', btnColor === colorHex);
+      });
+    }
+
+    // === 自定义动画系统 ===
+
+    const customAnims = {
+      // 呼吸动画：控制背部骨骼轻微起伏
+      idle: {
+        duration: 2000,
+        loop: true,
+        init: (obj) => {
+          // 找到关键骨骼节点
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          const breathe = 0.05 * Math.sin(progress * Math.PI * 2);
+
+          // 背部脊柱弯曲（呼吸起伏）
+          ['back3_012', 'back2_013', 'back1_014', 'spine.01_012', 'spine.02_013', 'torso_02'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = breathe;
+            }
+          });
+
+          // 尾巴轻微摆动
+          ['tail_07', 'tail.01_08', 'tail.02_09', 'tail.03_010'].forEach((name, i) => {
+            if (bones[name]) {
+              bones[name].rotation.z = 0.1 * Math.sin(progress * Math.PI * 2 + i * 0.5);
+            }
+          });
+
+          // 耳朵轻微抖动
+          ['r_ear_017', 'l_ear_019', 'ear.L_019', 'ear.R_020'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.z = 0.05 * Math.sin(progress * Math.PI * 4);
+            }
+          });
+        }
+      },
+      // 下落动画：腿部伸出（骨骼调整）
+      fall: {
+        duration: 500,
+        loop: true,
+        init: (obj) => {
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+              // 保存初始旋转
+              child.userData.initialRot = { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z };
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          const extend = progress < 0.5 ? progress * 2 : 1;
+
+          // 前腿向前伸出
+          ['r_handTop_01', 'l_handTop_06', 'leg.upper.F.L_014', 'leg.upper.F.R_024'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.3 * extend;
+            }
+          });
+
+          // 后腿向后伸出
+          ['rLeg_Top_022', 'lLeg_Top_027', 'thigh.B.L_03', 'thigh.B.R_026'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.3 * extend;
+            }
+          });
+        }
+      },
+      // 悬停动画：头部看向观察者 + 耳朵前倾
+      hover: {
+        duration: 800,
+        loop: true,
+        init: (obj) => {
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+              child.userData.initialRot = { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z };
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          const look = Math.sin(progress * Math.PI * 2);
+
+          // 头部抬起看向观察者
+          ['head_016', 'head_018'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.2 + 0.1 * look;
+              bones[name].rotation.y = 0.1 * look;
+            }
+          });
+
+          // 耳朵前倾（警觉姿态）
+          ['r_ear_017', 'l_ear_019', 'ear.L_019', 'ear.R_020'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.3 + 0.1 * look;
+            }
+          });
+
+          // 尾巴竖起
+          ['tail_07', 'joint1_00'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.z = -0.5 + 0.1 * look;
+            }
+          });
+        }
+      },
+      // 趴睡：腿部折叠 + 脊柱下压
+      sleep: {
+        duration: 1000,
+        loop: true,
+        init: (obj) => {
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+              child.userData.initialRot = { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z };
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          // 缓入缓出
+          const t = progress < 0.5 ? progress * 2 : 1;
+          const fold = Math.min(t, 1);
+
+          // 背部下压
+          ['back3_012', 'back2_013', 'back1_014', 'spine.01_012', 'spine.02_013'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.2 * fold;
+            }
+          });
+
+          // 前腿折叠
+          ['r_handTop_01', 'l_handTop_06', 'r_hand2_02', 'l_hand2_07', 'leg.upper.F.L_014', 'leg.upper.F.R_024'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.8 * fold;
+            }
+          });
+
+          // 后腿折叠
+          ['rLeg_Top_022', 'lLeg_Top_027', 'rLeg2_023', 'lLeg2_028', 'thigh.B.L_03', 'thigh.B.R_026'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.5 * fold;
+            }
+          });
+
+          // 头部放低
+          ['head_016', 'head_018'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.3 * fold;
+            }
+          });
+
+          // 尾巴放松平放
+          ['tail_07', 'tail.01_08', 'joint1_00', 'joint2_032'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.z = 0.3 * fold;
+            }
+          });
+        }
+      },
+      // 胜利：头部抬起 + 前腿举起
+      win: {
+        duration: 600,
+        loop: true,
+        init: (obj) => {
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+              child.userData.initialRot = { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z };
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          const celebrate = Math.sin(progress * Math.PI * 2);
+
+          // 头部高昂
+          ['head_016', 'head_018'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.4 + 0.1 * celebrate;
+            }
+          });
+
+          // 前腿举起欢呼
+          ['r_handTop_01', 'l_handTop_06', 'leg.upper.F.L_014', 'leg.upper.F.R_024'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.6 + 0.2 * Math.abs(celebrate);
+            }
+          });
+
+          // 耳朵竖起
+          ['r_ear_017', 'l_ear_019', 'ear.L_019', 'ear.R_020'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = -0.4;
+            }
+          });
+
+          // 尾巴高举摇摆
+          ['tail_07', 'tail.01_08', 'joint1_00', 'joint2_032'].forEach((name, i) => {
+            if (bones[name]) {
+              bones[name].rotation.z = -0.6 + 0.3 * Math.sin(progress * Math.PI * 4 + i * 0.5);
+            }
+          });
+        }
+      },
+      // 失败：头部低下 + 身体收缩
+      lose: {
+        duration: 1200,
+        loop: true,
+        init: (obj) => {
+          obj.userData.bones = {};
+          obj.traverse(child => {
+            if (child.isBone || (child.type === 'Object3D' && child.name)) {
+              obj.userData.bones[child.name] = child;
+              child.userData.initialRot = { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z };
+            }
+          });
+        },
+        update: (obj, progress) => {
+          const bones = obj.userData.bones;
+          const sad = Math.sin(progress * Math.PI);
+
+          // 头部低垂
+          ['head_016', 'head_018'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.5 * sad;
+            }
+          });
+
+          // 耳朵耷拉
+          ['r_ear_017', 'l_ear_019', 'ear.L_019', 'ear.R_020'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.4 * sad;
+            }
+          });
+
+          // 背部收缩
+          ['back3_012', 'back2_013', 'back1_014', 'spine.01_012', 'spine.02_013'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.x = 0.15 * sad;
+            }
+          });
+
+          // 尾巴低垂
+          ['tail_07', 'tail.01_08', 'joint1_00', 'joint2_032'].forEach(name => {
+            if (bones[name]) {
+              bones[name].rotation.z = 0.5 * sad;
+            }
+          });
+
+          // 透明度变化
+          obj.traverse(child => {
+            if (child.isMesh && child.material) {
+              child.material.opacity = 1 - 0.3 * sad;
+              child.material.transparent = true;
+            }
+          });
+        }
+      }
+    };
+
+    function startCustomAnim(type) {
+      if (!state.loadedModel) return;
+
+      // 停止之前的自定义动画
+      if (state.customAnim) {
+        if (state.customAnim.finish) {
+          state.customAnim.finish(state.loadedModel);
+        }
+        state.customAnim = null;
+      }
+
+      state.customAnimType = type;
+
+      if (type === 'stop') {
+        // 重置模型状态
+        resetModelState();
+        updateCustomAnimButtons('stop');
+        return;
+      }
+
+      const anim = customAnims[type];
+      if (!anim) return;
+
+      // 保存基础缩放值
+      if (!state.loadedModel.userData.baseScale) {
+        state.loadedModel.userData.baseScale = state.loadedModel.scale.x;
+      }
+
+      // 初始化动画
+      if (anim.init) {
+        anim.init(state.loadedModel);
+      }
+
+      state.customAnim = {
+        startTime: performance.now(),
+        ...anim
+      };
+
+      updateCustomAnimButtons(type);
+    }
+
+    function resetModelState() {
+      if (!state.loadedModel) return;
+
+      // 重置整体变换
+      const baseScale = state.loadedModel.userData.baseScale || state.loadedModel.scale.x;
+      state.loadedModel.scale.setScalar(baseScale);
+      state.loadedModel.position.set(0, 0, 0);
+      state.loadedModel.rotation.set(0, 0, 0);
+
+      // 重置所有骨骼旋转
+      state.loadedModel.traverse(child => {
+        if (child.isBone || (child.type === 'Object3D' && child.name)) {
+          if (child.userData.initialRot) {
+            child.rotation.x = child.userData.initialRot.x;
+            child.rotation.y = child.userData.initialRot.y;
+            child.rotation.z = child.userData.initialRot.z;
+          } else {
+            child.rotation.set(0, 0, 0);
+          }
+        }
+        // 重置材质透明度
+        if (child.isMesh && child.material) {
+          child.material.opacity = 1;
+        }
+      });
+    }
+
+    function updateCustomAnimButtons(activeType) {
+      document.querySelectorAll('.custom-anim').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.type === activeType);
+      });
+    }
+
+    function updateCustomAnim() {
+      if (!state.customAnim || !state.loadedModel) return;
+
+      const elapsed = performance.now() - state.customAnim.startTime;
+      const duration = state.customAnim.duration;
+      const progress = (elapsed % duration) / duration;
+
+      state.customAnim.update(state.loadedModel, progress);
+    }
+
+    // 绑定自定义动画按钮
+    document.querySelectorAll('.custom-anim').forEach(btn => {
+      btn.addEventListener('click', () => {
+        startCustomAnim(btn.dataset.type);
+      });
+    });
+
+    // 模型切换
+    document.querySelectorAll('.model-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const modelName = btn.dataset.model;
+        state.currentModel = modelName;
+
+        // 更新按钮状态
+        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        loadModel(modelName);
+      });
+    });
+
+    // 颜色切换
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const colorHex = parseInt(btn.dataset.color);
+        applyColor(colorHex);
+      });
+    });
+
+    // === 动画循环 ===
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      if (state.mixer) state.mixer.update(clock.getDelta());
+      if (state.customAnim) updateCustomAnim();
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // === 窗口大小调整 ===
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // === 初始化加载第一个模型 ===
+    loadModel(state.currentModel);
+
+  </script>
+</body>
+</html>

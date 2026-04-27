@@ -3,9 +3,9 @@
 ## 基本信息
 - **项目名称**：3D四子棋（Connect Four 3D）
 - **架构师**：Architect Agent
-- **文档版本**：v1.2
+- **文档版本**：v2.0
 - **创建日期**：2026-04-22
-- **更新日期**：2026-04-23
+- **更新日期**：2026-04-27
 - **交接目标**：💻 Dev Agent
 - **前置依赖**：requirements.md v1.4
 - **视觉设计参考**：docs/design/visual-style-guide.md
@@ -20,6 +20,7 @@
 |------|------|------|----------|
 | 前端框架 | TypeScript | 5.x | 类型安全，提升代码质量和可维护性 |
 | 3D引擎 | Three.js | r160+ | WebGL封装完善，社区活跃，适合3D游戏开发 |
+| 3D加载器 | Three.js GLTFLoader/TextureLoader | r160+ | GLB模型加载、纹理贴图、天空盒加载（Phase 7） |
 | 构建工具 | Vite | 5.x | 快速冷启动，HMR响应迅速，适合Web游戏开发 |
 | 状态管理 | 状态模式（自定义） | - | 游戏状态明确，使用状态机模式管理游戏流程 |
 | 数据存储 | localStorage | - | 本地战绩记录，无需后端，浏览器原生支持 |
@@ -52,8 +53,8 @@
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                    Presentation Layer                        │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │   │
-│  │  │  GameUI     │  │  MenuUI     │  │  StatsUI            │  │   │
-│  │  │ (HUD面板)   │  │ (主菜单)    │  │ (战绩展示)          │  │   │
+│  │  │  GameUI     │  │  MenuUI     │  │  ThemeSelectUI      │  │   │
+│  │  │ (HUD面板)   │  │ (主菜单)    │  │ (主题选择) Phase 7  │  │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓ ↑                                    │
@@ -70,39 +71,72 @@
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓ ↑                                    │
 │  ┌─────────────────────────────────────────────────────────────┐   │
+│  │              Theme Layer (Phase 7 新增)                      │   │
+│  │  ┌─────────────┐  ┌─────────────────────────────────────┐  │   │
+│  │  │ ThemeManager │  │ ThemeLoader                         │  │   │
+│  │  │ (主题管理)   │  │ (素材加载+缓存)                     │  │   │
+│  │  └─────────────┘  └─────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │              State Layer (Phase 7 新增)                      │   │
+│  │  ┌─────────────────────────────────────────────────────┐   │   │
+│  │  │ PieceStateManager (6状态机: Sleep→Idle→Hover→... )  │   │   │
+│  │  └─────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │           Animation Layer (Phase 7 新增)                     │   │
+│  │  ┌─────────────────────────────────────────────────────┐   │   │
+│  │  │ AnimationController (循环+触发动画)                   │   │   │
+│  │  └─────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                    Rendering Layer                           │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │   │
 │  │  │ BoardRenderer│ │ PieceRenderer│ │ EffectsRenderer    │  │   │
 │  │  │ (棋盘渲染)  │  │ (棋子渲染)  │  │ (特效渲染)         │  │   │
+│  │  │              │  │ Phase 7 新增 │  │ Phase 10           │  │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘  │   │
 │  │  ┌─────────────┐  ┌─────────────────────────────────────┐  │   │
-│  │  │ CameraCtrl  │  │ Three.js Scene                      │  │   │
-│  │  │ (视角控制)  │  │ (WebGL渲染引擎)                     │  │   │
+│  │  │ Environment │  │ CameraCtrl  + Three.js Scene        │  │   │
+│  │  │ Renderer    │  │ (视角控制)    (WebGL渲染引擎)       │  │   │
+│  │  │ Phase 7 新增 │  │                                     │  │   │
 │  │  └─────────────┘  └─────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓ ↑                                    │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                    Data Layer                                │   │
 │  │  ┌─────────────┐  ┌─────────────────────────────────────┐  │   │
-│  │  │ StatsStore  │  │ localStorage                        │  │   │
-│  │  │ (战绩存储)  │  │ (持久化存储)                        │  │   │
+│  │  │ StatsStore  │  │ ThemeCache (素材缓存, Phase 7)      │  │   │
+│  │  │ (战绩存储)  │  │ localStorage (主题偏好, Phase 7)    │  │   │
 │  │  └─────────────┘  └─────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 模块交互流程
+### 模块交互流程（Phase 7 扩展版）
 
 ```
 用户操作 → InputHandler → GameController → GameState变更
                 ↓                           ↓
          CameraCtrl(右键)            Board更新/AI计算
                 ↓                           ↓
-         视角旋转                   WinChecker检测
+         视角旋转                   WinChecker检测 → 胜负
                                           ↓
-                                   结果 → EffectsRenderer
+                                    PieceStateManager
                                           ↓
-                                   StatsStore更新
+                                 AnimationController → PieceRenderer
+                                          ↓
+                                 EnvironmentRenderer(背景/光照)
+                                          ↓
+                                    StatsStore更新
+
+主题切换流程：
+ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
+                                                    ↓
+                                           GameController 更新主题引用
 ```
 
 ---
@@ -993,6 +1027,667 @@
 
 ---
 
+### 模块 13：ThemeManager（主题管理）
+
+#### 1. 背景与必要性
+- **为什么需要**：统一管理主题配置、切换流程、素材状态，协调各渲染器同步更新
+- **如果没有**：主题切换散落在各模块，难以协调和调试，切换过程中可能出现渲染不一致
+
+#### 2. 工作原理
+- **核心机制**：
+  - 维护当前主题ID和所有注册的主题配置
+  - 协调 ThemeLoader 加载素材
+  - 通知所有渲染器应用新主题（PieceRenderer, BoardRenderer, EnvironmentRenderer）
+  - 切换失败时自动 fallback 到经典主题
+- **数据流向**：
+  ```
+  ThemeSelectUI 选择主题 → ThemeManager.setTheme()
+                           → ThemeLoader.preloadTheme()
+                           → PieceRenderer.init() 重建棋子Mesh池
+                           → BoardRenderer.applyTheme() 更新棋盘材质
+                           → EnvironmentRenderer.applyTheme() 更新背景/光照
+                           → 完成，回调UI
+                           → 失败 → 自动 fallback 到 CLASSIC 主题
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Theme Layer 核心（Phase 7 新增层）
+- **关系**：被 ThemeSelectUI 和 MenuUI 调用，协调 ThemeLoader 和各渲染器
+- **贡献**：实现主题切换的核心流程，确保切换安全可靠
+
+#### 4. 技术规格
+- **职责**：主题配置管理、切换流程协调、素材状态追踪
+- **输入**：ThemeId
+- **输出**：切换完成事件 / 失败 fallback 事件
+- **依赖**：ThemeLoader, PieceRenderer, BoardRenderer, EnvironmentRenderer
+- **接口定义**：
+  ```typescript
+  interface IThemeManager {
+    currentTheme: ThemeId;
+    themes: Map<ThemeId, ThemeConfig>;
+
+    /** 注册主题配置 */
+    registerTheme(id: ThemeId, config: ThemeConfig): void;
+
+    /** 切换主题（异步，含加载） */
+    setTheme(id: ThemeId): Promise<boolean>;
+
+    /** 获取当前主题配置 */
+    getThemeConfig(): ThemeConfig;
+
+    /** 检查主题是否已加载 */
+    isLoaded(id: ThemeId): boolean;
+
+    /** 注册主题变更回调 */
+    onThemeChange(callback: (theme: ThemeId) => void): void;
+  }
+  ```
+
+---
+
+### 模块 14：ThemeLoader（素材加载）
+
+#### 1. 背景与必要性
+- **为什么需要**：统一加载 GLB 模型、纹理、天空盒，管理缓存和加载状态，提供失败 fallback
+- **如果没有**：各模块分散加载，重复请求相同素材，没有统一的失败处理机制
+
+#### 2. 工作原理
+- **核心机制**：
+  - 使用 GLTFLoader 加载 GLB 模型（猫咪/机甲主题）
+  - 使用 TextureLoader 加载纹理贴图
+  - 使用 CubeTextureLoader 加载天空盒
+  - 素材缓存（Map<path, Object3D>），避免重复加载
+  - 黑白共用模型，运行时通过 `traverse` 修改材质颜色
+- **数据流向**：
+  ```
+  loadRequest → checkCache(key)
+    ├── 已缓存 → 返回缓存对象
+    └── 未缓存 → 创建Loader → fetch → storeCache(key, obj) → 返回
+
+  preloadTheme(config) → 遍历所有素材路径 → 并行加载所有素材
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Theme Layer，素材管理
+- **关系**：被 ThemeManager 调用，被 PieceRenderer 和 EnvironmentRenderer 使用
+- **贡献**：提供统一的素材加载和缓存服务
+
+#### 4. 技术规格
+- **职责**：素材加载、缓存管理、失败 fallback
+- **输入**：素材路径（字符串）
+- **输出**：THREE.Object3D / THREE.Texture / THREE.CubeTexture
+- **依赖**：Three.js GLTFLoader, TextureLoader, CubeTextureLoader
+- **接口定义**：
+  ```typescript
+  interface IThemeLoader {
+    /** 加载 GLB 模型 */
+    loadModel(path: string): Promise<THREE.Group>;
+
+    /** 加载纹理贴图 */
+    loadTexture(path: string): Promise<THREE.Texture>;
+
+    /** 加载天空盒 */
+    loadSkybox(paths: string[]): Promise<THREE.CubeTexture>;
+
+    /** 预加载整套主题素材 */
+    preloadTheme(config: ThemeConfig): Promise<void>;
+
+    /** 黑白共用模型改色 */
+    applyColorToModel(model: THREE.Group, color: number, materialConfig?: MaterialConfig): void;
+
+    /** 清空缓存 */
+    clearCache(): void;
+  }
+  ```
+
+---
+
+### 模块 15：PieceStateManager（棋子状态管理）
+
+#### 1. 背景与必要性
+- **为什么需要**：管理每颗棋子的6状态机（Sleep→Idle→Hover→Fall→Impact→Win/Lose），触发对应动画
+- **如果没有**：动画触发混乱，状态冲突，无法正确响应覆盖/悬停/下落事件
+
+#### 2. 工作原理
+- **核心机制**：中央状态机管理所有棋子状态，事件驱动转换
+- **状态转换表**：
+
+  | 当前状态 | 触发事件 | 新状态 | 动画行为 |
+  |----------|----------|--------|----------|
+  | SLEEP | UNCOVERED | IDLE | 启动呼吸动画 |
+  | IDLE | COVERED | SLEEP | 停止呼吸 + 切换休眠素材 |
+  | IDLE | HOVER_START | HOVER | 停止呼吸 + 播放悬停动画 |
+  | HOVER | HOVER_END | IDLE | 停止悬停 + 启动呼吸 |
+  | IDLE/HOVER | FALL_IMPACT | IMPACT | 播放对抗动画 → 结束后回 IDLE |
+  | FALL | 动画结束 | IDLE | 启动呼吸 |
+  | IMPACT | 动画结束 | IDLE | 启动呼吸 |
+  | ANY | GAME_WIN | WIN | 播放胜利动画 |
+  | ANY | GAME_LOSE | LOSE | 播放失败动画 |
+  | WIN/LOSE | GAME_RESET | SLEEP/IDLE | 清除动画，按层级恢复 |
+
+- **数据流向**：
+  ```
+  外部事件（Board.placePiece / InputHandler.onHover / WinChecker）
+      ↓
+  PieceStateManager.processEvent(pos, event)
+      ↓
+  查询当前状态 → 查状态转换表 → 更新缓存 → 触发 AnimationController
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：State Layer（Phase 7 新增层）
+- **关系**：被 GameController 调用，调用 AnimationController 播放动画
+- **贡献**：确保每颗棋子在正确的时间点播放正确的动画
+
+#### 4. 技术规格
+- **职责**：棋子状态管理、状态转换、动画触发
+- **输入**：Position + PieceEvent
+- **输出**：状态变更通知 + 动画指令
+- **依赖**：AnimationController, Board
+- **接口定义**：
+  ```typescript
+  interface IPieceStateManager {
+    /** 获取棋子当前状态 */
+    getState(pos: Position): PieceState;
+
+    /** 处理事件（状态转换入口） */
+    processEvent(pos: Position, event: PieceEvent): void;
+
+    /** 批量处理事件 */
+    processEventForAll(event: PieceEvent, filter?: (pos: Position) => boolean): void;
+
+    /** 注册状态变更回调 */
+    onStateChange(callback: StateChangeCallback): void;
+
+    /** 游戏重置 */
+    reset(): void;
+  }
+
+  type PieceState = 'SLEEP' | 'IDLE' | 'HOVER' | 'FALL' | 'IMPACT' | 'WIN' | 'LOSE';
+  type PieceEvent = 'COVERED' | 'UNCOVERED' | 'HOVER_START' | 'HOVER_END' |
+                      'FALL_IMPACT' | 'GAME_WIN' | 'GAME_LOSE' | 'GAME_RESET';
+  ```
+
+---
+
+### 模块 16：AnimationController（动画控制）
+
+#### 1. 背景与必要性
+- **为什么需要**：统一控制循环动画（呼吸）和触发动画（悬停/下落/对抗/胜负），避免动画冲突
+- **如果没有**：动画散落在各处，难以协调停播，同在顶层棋子上可能发生动画冲突
+
+#### 2. 工作原理
+- **核心机制**：
+  - 循环动画（Idle）：requestAnimationFrame 每帧更新活跃棋子列表
+  - 触发动画（Hover/Fall/Impact）：事件触发时播放，完成后自动停止
+  - 区分己方/对方：根据棋子所属玩家 vs 当前人类玩家判断
+  - 动画参数从 ThemeConfig 读取，实现主题差异化
+- **数据流向**：
+  ```
+  循环动画（每帧）：
+  AnimationController.update(deltaTime)
+      ↓
+  遍历 idleList → 读取主题配置 → 应用 CodeAnimation（缩放/旋转/位移/材质）
+      ↓
+  requestAnimationFrame 循环
+
+  触发动画（一次性）：
+  AnimationController.playFall(piece, isOwn)
+      ↓
+  创建动画序列（Promise） → 播放 → 完成后自动停止 → 通知 PieceStateManager
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Animation Layer（Phase 7 新增层）
+- **关系**：被 PieceStateManager 和 GameController 调用，依赖 ThemeConfig 动画参数
+- **贡献**：提供统一的动画执行引擎
+- **关键集成点**：`AnimationController.updateAllIdle(deltaTime)` 在 **SceneSetup.animate()** 的 requestAnimationFrame 循环中每帧调用，保持循环动画与渲染帧同步。不在 GameController 中调用（避免逻辑层耦合渲染帧）。
+
+#### 4. 技术规格
+- **职责**：动画播放、停止、每帧更新
+- **输入**：PieceMesh + 动画类型 + isOwn 标志
+- **输出**：Three.js 对象变换（position/scale/rotation/material 更新）
+- **依赖**：ThemeConfig（动画参数）
+- **接口定义**：
+  ```typescript
+  interface IAnimationController {
+    // ===== 循环动画 =====
+    startIdleAnimation(piece: PieceMesh): void;
+    stopIdleAnimation(piece: PieceMesh): void;
+    updateAllIdle(deltaTime: number): void;  // 每帧调用
+
+    // ===== 触发动画（持续型） =====
+    playHoverAnimation(piece: PieceMesh, isOwn: boolean): void;
+    stopHoverAnimation(piece: PieceMesh): void;
+
+    // ===== 触发动画（一次性） =====
+    playFallAnimation(piece: PieceMesh, isOwnBase: boolean): Promise<void>;
+    playImpactAnimation(piece: PieceMesh, isOwn: boolean): Promise<void>;
+    playWinAnimation(piece: PieceMesh): void;
+    playLoseAnimation(piece: PieceMesh): void;
+
+    // ===== 批量操作 =====
+    playWinAnimationForAll(winner: Player): void;
+    playLoseAnimationForAll(loser: Player): void;
+
+    // ===== 姿态切换 =====
+    switchToSleep(piece: PieceMesh): void;
+    switchToActive(piece: PieceMesh): void;
+
+    // ===== 重置 =====
+    clearAllAnimations(): void;
+  }
+  ```
+
+---
+
+### 模块 17：PieceRenderer（棋子渲染 - Phase 7 新增）
+
+#### 1. 背景与必要性
+- **为什么需要**：猫咪/机甲主题使用GLB模型棋子，需要单独的Mesh管理和姿态切换逻辑。经典主题的圆柱体棋子沿用 BoardRenderer。
+- **如果没有**：无法渲染猫咪/机甲主题的GLB模型棋子，动画播放时无法切换姿态
+
+#### 2. 工作原理
+- **核心机制与模块划分**：
+  ```
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 棋子渲染职责划分（Phase 7+）                               │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  BoardRenderer（T7-7：增强现有模块）                        │
+  │  ├── 棋盘底座/网格渲染（不变）                              │
+  │  ├── 高亮/预览棋子（不变）                                  │
+  │  ├── 经典主题圆柱体棋子（已有 addPiece/animatePieceDrop）   │
+  │  └── applyTheme() — 颜色/材质/高亮色 从 ThemeConfig 读取   │
+  │                                                             │
+  │  PieceRenderer（T7-6：新增模块 — GLB模型专用）              │
+  │  ├── 猫咪/机甲主题 GLB 模型加载与 Mesh 池管理               │
+  │  ├── 姿态切换：活跃(蹲坐/站立) ↔ 休眠(趴睡/收拢)            │
+  │  ├── 黑白共用模型运行时改色                                  │
+  │  └── 提供 PieceMesh 引用给 AnimationController 驱动动画      │
+  │                                                             │
+  │  协作方式：                                                 │
+  │  - 根据当前主题决定由谁负责棋子渲染                          │
+  │  - 经典主题 → BoardRenderer.addPiece()                      │
+  │  - 猫咪/机甲主题 → PieceRenderer.addPiece()                 │
+  │  - GameController 通过统一接口调用，不感知底层差异           │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+  ```
+- **数据流向**：
+  ```
+  ThemeManager.setTheme()
+      ↓
+  主题ID判断:
+  ├─ CLASSIC → 使用 BoardRenderer 的几何体棋子（已有）
+  └─ CAT/MECHA → PieceRenderer.init() → 加载GLB → 创建Mesh池
+
+  GameController 放置棋子 → (主题判断) →
+    ├─ BoardRenderer.addPiece() if 经典主题
+    └─ PieceRenderer.addPiece() if GLB主题
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Rendering Layer，与 BoardRenderer 协作
+- **关系**：被 ThemeManager 初始化，被 GameController 调用（仅GLB主题时），为 AnimationController 提供 PieceMesh 引用
+- **贡献**：实现 GLB 模型棋子的加载、渲染和姿态管理
+
+#### 4. 技术规格
+- **职责**：GLB模型棋子 Mesh 管理、姿态切换、运行时改色
+- **输入**：Position + Player + PieceState
+- **输出**：PieceMesh（包装后的 Three.js Object3D）
+- **依赖**：ThemeLoader（加载 GLB）, ThemeConfig
+- **注意**：经典主题的棋子渲染继续由 BoardRenderer 负责，PieceRenderer 仅处理猫咪/机甲主题
+- **接口定义**：
+  ```typescript
+  interface IPieceRenderer {
+    /** 根据主题初始化渲染器 */
+    init(scene: THREE.Scene, theme: ThemeConfig): Promise<void>;
+
+    /** 添加棋子到场景 */
+    addPiece(pos: Position, player: Player, isTop: boolean): PieceMesh;
+
+    /** 移除棋子 */
+    removePiece(pos: Position): void;
+
+    /** 更新棋子状态（切换活跃/休眠姿态） */
+    updatePieceState(pos: Position, state: PieceState): void;
+
+    /** 获取指定位置的棋子 Mesh */
+    getPieceMesh(pos: Position): PieceMesh | null;
+
+    /** 获取所有棋子 Mesh */
+    getAllPieceMeshes(): PieceMesh[];
+
+    /** 清空所有棋子 */
+    clearAll(): void;
+  }
+
+  interface PieceMesh {
+    mesh: THREE.Object3D;      // 棋子 Mesh（可能是 Group）
+    position: Position;        // 棋盘位置
+    player: Player;            // 所属玩家
+    state: PieceState;         // 当前状态
+    isOwn: boolean;            // 是否己方（相对于当前玩家）
+  }
+  ```
+
+---
+
+### 模块 18：EnvironmentRenderer（环境渲染 - Phase 7 新增）
+
+#### 1. 背景与必要性
+- **为什么需要**：根据主题动态切换背景（颜色/渐变/天空盒）和光照（环境光/主光/补光）
+- **如果没有**：背景和光照固定，与主题不协调（如猫咪主题的暖光照无法呈现）
+
+#### 2. 工作原理
+- **核心机制**：
+  - 背景：支持 color（纯色）、gradient（渐变色，用 Canvas2D 生成纹理）、skybox（6面天空盒）
+  - 光照：管理 Three.js Scene 中的 AmbientLight、DirectionalLight（主光/补光）
+  - 切换时平滑过渡或立即切换
+- **数据流向**：
+  ```
+  ThemeManager.setTheme() → EnvironmentRenderer.applyTheme()
+      ↓
+  读取 ThemeConfig.environment
+      ↓
+  背景：根据 type 创建对应背景 → 赋值到 scene.background
+  光照：更新各光源的 color + intensity + position
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Rendering Layer，环境管理
+- **关系**：被 ThemeManager 调用，操作 SceneSetup 中的 Three.js Scene
+- **贡献**：实现环境主题化，增强视觉沉浸感
+
+#### 4. 技术规格
+- **职责**：背景渲染、光照管理
+- **输入**：ThemeConfig.environment
+- **输出**：Three.js Scene 背景 + 光源更新
+- **依赖**：Three.js Scene, ThemeLoader（天空盒）, SceneSetup
+- **接口定义**：
+  ```typescript
+  interface IEnvironmentRenderer {
+    /** 初始化（创建默认光照） */
+    init(scene: THREE.Scene): void;
+
+    /** 应用主题环境配置 */
+    applyTheme(theme: ThemeConfig): Promise<void>;
+
+    /** 单独设置背景 */
+    setBackground(bg: BackgroundTheme): void;
+
+    /** 单独设置光照 */
+    setLighting(lighting: LightTheme): void;
+
+    /** 清空（移除光源和背景） */
+    clear(): void;
+  }
+  ```
+
+---
+
+### 模块 19：ThemeSelectUI（主题选择界面）
+
+#### 1. 背景与必要性
+- **为什么需要**：提供主题切换入口和预览，确保用户明确知道切换结果
+- **如果没有**：无法切换主题，主题系统没有用户交互入口
+
+#### 2. 工作原理
+- **核心机制**：HTML/CSS 面板 + 文字描述 + 预览图片 + 二次确认弹窗
+- **UI 布局**：
+  ```
+  主菜单中 "主题切换" 按钮 → 弹出主题选择面板
+  ┌─────────────────────────────────────┐
+  │          主题选择面板                │
+  ├─────────────────────────────────────┤
+  │  [经典预览] [猫咪预览] [机甲预览]    │
+  │  经典主题   猫咪主题   机甲主题       │
+  │  苹果风格   黑猫白猫   机甲对战       │
+  │                                     │
+  │       [确认切换]    [取消]           │
+  └─────────────────────────────────────┘
+  ```
+- **二次确认**：点击"确认切换"后弹出确认弹窗，防止误操作
+- **状态展示**：当前使用中的主题高亮标记
+- **数据流向**：
+  ```
+  MenuUI "主题切换" 按钮 → ThemeSelectUI.show()
+      ↓
+  显示主题列表（预览图 + 名称 + 描述）
+      ↓
+  用户选择 → 高亮选中 → 点击确认
+      ↓
+  二次确认 → ThemeManager.setTheme() → 关闭面板
+  ```
+
+#### 3. 服务于整体项目
+- **位置**：Presentation Layer
+- **关系**：被 MenuUI 触发，调用 ThemeManager 执行切换
+- **贡献**：提供主题切换的用户交互界面
+
+#### 4. 技术规格
+- **职责**：主题选择 UI、二次确认弹窗
+- **输入**：用户点击
+- **输出**：选中的 ThemeId
+- **依赖**：ThemeManager（获取主题列表和状态）
+- **接口定义**：
+  ```typescript
+  interface IThemeSelectUI {
+    /** 显示主题选择面板 */
+    show(): void;
+
+    /** 隐藏主题选择面板 */
+    hide(): void;
+
+    /** 设置主题列表 */
+    setThemeList(themes: ThemePreviewItem[]): void;
+
+    /** 选择回调 */
+    onSelect(callback: (themeId: ThemeId) => void): void;
+
+    /** 显示二次确认弹窗（返回 Promise<boolean>） */
+    showConfirmDialog(themeName: string): Promise<boolean>;
+  }
+
+  interface ThemePreviewItem {
+    id: ThemeId;
+    name: string;
+    description: string;
+    previewImage: string;  // 预览图片路径
+  }
+  ```
+
+---
+
+### 集成设计：现有模块与新主题系统的连接
+
+#### GameController 集成
+
+GameController 需要新增主题感知能力，将游戏中的事件（放置、悬停、胜负）转发给 PieceStateManager 和 AnimationController。
+
+```typescript
+// GameController 新增方法
+class GameController {
+  // 新增依赖
+  private themeManager: ThemeManager;
+  private pieceStateManager: PieceStateManager;
+  private animationController: AnimationController;
+  private pieceRenderer: PieceRenderer;  // 替代原boardRenderer的棋子职责
+
+  /** 切换主题 */
+  setTheme(themeId: ThemeId): Promise<void> {
+    return this.themeManager.setTheme(themeId);
+  }
+
+  /** 修改 handlePlayerClick — 增加动画触发 */
+  handlePlayerClick(x, y): void {
+    // ... 原有放置逻辑 ...
+    const result = this.board.placePiece(x, y, playerPiece);
+
+    // Phase 7 新增：触发棋子状态变更和动画
+    // 下层棋子: COVERED
+    const belowPos = { ...result.pos, z: result.pos.z - 1 };
+    if (this.board.isOccupied(belowPos)) {
+      this.pieceStateManager.processEvent(belowPos, 'COVERED');
+    }
+    // 本棋子: FALL → animation.then → IDLE
+    this.pieceStateManager.processEvent(result.pos, 'FALL');
+
+    // 渲染（通过 PieceRenderer）
+    this.pieceRenderer.addPiece(result.pos, playerPiece, /* isTop */ true);
+  }
+
+  /** 修改 handleHover — 触发悬停动画 */
+  handleHover(x, y): void {
+    if (!this.state.isPlayerTurn()) return;
+    // Phase 7 新增：触发悬停事件
+    const topPos = this.board.findDropPosition(x, y); // 需要获取顶层棋子位置
+    if (topPos) {
+      this.pieceStateManager.processEvent(topPos, 'HOVER_START');
+    }
+  }
+
+  /** 修改 handleWin — 触发胜负动画 */
+  handleWin(winResult): void {
+    // Phase 7 新增：播放批量胜负动画
+    this.animationController.playWinAnimationForAll(winResult.winner);
+    this.animationController.playLoseAnimationForAll(this.getOpponent(winResult.winner));
+  }
+}
+```
+
+#### BoardRenderer 集成
+
+BoardRenderer 新增 `applyTheme()` 方法，从 ThemeConfig 读取材质颜色而非硬编码 gameConfig。
+
+> **注意**：`ThemeConfig.board` 类型以 `src/types/theme.ts` 中的 `BoardTheme` 定义为准。
+> BoardTheme 包含 baseType/geometry/model/grid/highlight/decorations 等字段，
+> 使用前检查 `baseType` 决定读取 `geometry` 还是 `model` 配置。
+> `theme-system-design.md` §5.2 中的简化版 BoardTheme 仅用于示意，不可直接使用。
+
+```typescript
+class BoardRenderer {
+  /** 新增：应用主题配置 */
+  applyTheme(theme: ThemeConfig): void {
+    // 棋盘底座颜色
+    if (theme.board.geometry) {
+      this.baseMaterial.color.setHex(theme.board.geometry.color);
+      this.baseMaterial.opacity = theme.board.geometry.opacity ?? 1.0;
+    }
+    // 网格颜色
+    this.gridMaterial.color.setHex(theme.board.grid.color);
+    this.gridMaterial.opacity = theme.board.grid.opacity;
+    // 高亮颜色
+    if (theme.board.highlight) {
+      this.cellHighlightColor = theme.board.highlight.cellHighlight.color;
+      this.verticalLineColor = theme.board.highlight.verticalHighlight.color;
+    }
+    // 预览棋子的透明度
+    if (theme.board.highlight?.previewHighlight) {
+      this.previewOpacity = theme.board.highlight.previewHighlight.opacity;
+    }
+  }
+}
+```
+
+#### SceneSetup + EnvironmentRenderer 集成
+
+SceneSetup 新增获取 Scene/光源 的方法，供 EnvironmentRenderer 控制。
+
+```typescript
+class SceneSetup {
+  // 新增：获取光源引用
+  getAmbientLight(): THREE.AmbientLight;
+  getMainLight(): THREE.DirectionalLight;
+  getFillLight(): THREE.DirectionalLight;
+
+  // 新增：设置背景
+  setBackground(bg: THREE.Color | THREE.Texture | THREE.CubeTexture): void;
+}
+```
+
+#### MenuUI 集成
+
+MenuUI 新增"主题切换"按钮入口。
+
+```typescript
+class MenuUI {
+  // 新增：主题切换回调
+  private onThemeSelect: (() => void) | null = null;
+
+  /** 注册主题切换回调 */
+  setThemeSelectCallback(callback: () => void): void;
+
+  /** 在菜单面板中添加主题切换按钮 */
+  private addThemeButton(): void {
+    const btn = document.createElement('button');
+    btn.textContent = '🎨 主题切换';
+    btn.onclick = () => this.onThemeSelect?.();
+    this.menuPanel?.appendChild(btn);
+  }
+}
+```
+
+#### main.ts 初始化流程（Phase 7 扩展版）
+
+```typescript
+class ConnectFour3D {
+  // Phase 7 新增模块
+  private themeManager: ThemeManager;
+  private themeLoader: ThemeLoader;
+  private pieceStateManager: PieceStateManager;
+  private animationController: AnimationController;
+  private pieceRenderer: PieceRenderer;
+  private environmentRenderer: EnvironmentRenderer;
+  private themeSelectUI: ThemeSelectUI;
+
+  async init(): Promise<void> {
+    // ... 原有初始化 ...
+
+    // Phase 7 初始化
+    this.themeLoader = new ThemeLoader();
+    this.themeManager = new ThemeManager(this.themeLoader);
+    this.pieceStateManager = new PieceStateManager();
+    this.animationController = new AnimationController();
+    this.pieceRenderer = new PieceRenderer(this.themeLoader);
+
+    // 注册主题
+    this.themeManager.registerTheme('CLASSIC', CLASSIC_THEME);
+    this.themeManager.registerTheme('CAT', CAT_THEME);       // Phase 8
+    this.themeManager.registerTheme('MECHA', MECHA_THEME);   // Phase 9
+
+    // 初始化环境渲染器
+    this.environmentRenderer = new EnvironmentRenderer(scene);
+    this.environmentRenderer.init();
+
+    // 初始化主题选择UI
+    this.themeSelectUI = new ThemeSelectUI(this.themeManager);
+    this.themeSelectUI.init();
+
+    // 设置主题切换回调
+    this.menuUI.setThemeSelectCallback(() => {
+      this.themeSelectUI.show();
+    });
+
+    // 加载默认主题
+    await this.themeManager.setTheme('CLASSIC');
+
+    // 更新 GameController 引用
+    this.gameController.setThemeManager(this.themeManager);
+    this.gameController.setPieceStateManager(this.pieceStateManager);
+    this.gameController.setAnimationController(this.animationController);
+
+    // 连接 AnimationController 到 SceneSetup 的渲染循环
+    this.sceneSetup.setAnimationController(this.animationController);
+    // SceneSetup.animate() 中每帧调用:
+    //   animationController.updateAllIdle(deltaTime);
+  }
+}
+```
+
+---
+
 ## 数据库设计
 
 ### 本地存储结构
@@ -1089,6 +1784,72 @@ interface IStatsStore {
   getStats(): GameStats;
   clear(): void;
 }
+
+// Phase 7 新增接口
+interface IThemeManager {
+  currentTheme: ThemeId;
+  registerTheme(id: ThemeId, config: ThemeConfig): void;
+  setTheme(id: ThemeId): Promise<boolean>;
+  getThemeConfig(): ThemeConfig;
+  isLoaded(id: ThemeId): boolean;
+  onThemeChange(callback: (theme: ThemeId) => void): void;
+}
+
+interface IThemeLoader {
+  loadModel(path: string): Promise<THREE.Group>;
+  loadTexture(path: string): Promise<THREE.Texture>;
+  loadSkybox(paths: string[]): Promise<THREE.CubeTexture>;
+  preloadTheme(config: ThemeConfig): Promise<void>;
+  applyColorToModel(model: THREE.Group, color: number, materialConfig?: MaterialConfig): void;
+  clearCache(): void;
+}
+
+interface IPieceStateManager {
+  getState(pos: Position): PieceState;
+  processEvent(pos: Position, event: PieceEvent): void;
+  processEventForAll(event: PieceEvent, filter?: (pos: Position) => boolean): void;
+  onStateChange(callback: StateChangeCallback): void;
+  reset(): void;
+}
+
+interface IAnimationController {
+  startIdleAnimation(piece: PieceMesh): void;
+  stopIdleAnimation(piece: PieceMesh): void;
+  updateAllIdle(deltaTime: number): void;
+  playHoverAnimation(piece: PieceMesh, isOwn: boolean): void;
+  stopHoverAnimation(piece: PieceMesh): void;
+  playFallAnimation(piece: PieceMesh, isOwnBase: boolean): Promise<void>;
+  playImpactAnimation(piece: PieceMesh, isOwn: boolean): Promise<void>;
+  playWinAnimationForAll(winner: Player): void;
+  playLoseAnimationForAll(loser: Player): void;
+  clearAllAnimations(): void;
+}
+
+interface IPieceRenderer {
+  init(scene: THREE.Scene, theme: ThemeConfig): Promise<void>;
+  addPiece(pos: Position, player: Player, isTop: boolean): PieceMesh;
+  removePiece(pos: Position): void;
+  updatePieceState(pos: Position, state: PieceState): void;
+  getPieceMesh(pos: Position): PieceMesh | null;
+  getAllPieceMeshes(): PieceMesh[];
+  clearAll(): void;
+}
+
+interface IEnvironmentRenderer {
+  init(scene: THREE.Scene): void;
+  applyTheme(theme: ThemeConfig): Promise<void>;
+  setBackground(bg: BackgroundTheme): void;
+  setLighting(lighting: LightTheme): void;
+  clear(): void;
+}
+
+interface IThemeSelectUI {
+  show(): void;
+  hide(): void;
+  setThemeList(themes: ThemePreviewItem[]): void;
+  onSelect(callback: (themeId: ThemeId) => void): void;
+  showConfirmDialog(themeName: string): Promise<boolean>;
+}
 ```
 
 ---
@@ -1128,9 +1889,13 @@ interface IStatsStore {
 connect4-3d/
 ├── docs/
 │   ├── requirements/
-│   │   └── requirements.md
-│   └── architecture/
-│   │   └── architecture.md
+│   │   ├── requirements.md
+│   │   └── theme-system-requirements.md   # Phase 7 主题系统需求
+│   ├── architecture/
+│   │   ├── architecture.md                # 主架构文档（含 Phase 7-9）
+│   │   └── theme-system-design.md         # Phase 7 主题系统详细设计
+│   └── design/
+│       └── visual-style-guide.md
 ├── src/
 │   ├── main.ts                 # 入口文件
 │   ├── core/
@@ -1139,27 +1904,44 @@ connect4-3d/
 │   │   ├── Board.ts            # 棋盘逻辑
 │   │   ├── WinChecker.ts       # 胜负判定
 │   │   ├── AIPlayer.ts         # AI决策
-│   │   └── StatsStore.ts       # 战绩存储
+│   │   ├── StatsStore.ts       # 战绩存储
+│   │   ├── ThemeManager.ts     # Phase 7 主题管理器
+│   │   ├── ThemeLoader.ts      # Phase 7 素材加载器
+│   │   ├── PieceStateManager.ts # Phase 7 棋子状态机
+│   │   └── AnimationController.ts # Phase 7 动画控制器
 │   ├── rendering/
-│   │   ├── BoardRenderer.ts    # 棋盘渲染
-│   │   ├── EffectsRenderer.ts  # 特效渲染
+│   │   ├── BoardRenderer.ts    # 棋盘渲染（改造支持主题）
+│   │   ├── PieceRenderer.ts    # Phase 7 棋子渲染（主题化）
+│   │   ├── EffectsRenderer.ts  # Phase 10 特效渲染
+│   │   ├── EnvironmentRenderer.ts # Phase 7 环境渲染
 │   │   ├── CameraController.ts # 视角控制
 │   │   └── SceneSetup.ts       # Three.js场景初始化
 │   ├── ui/
 │   │   ├── GameUI.ts           # 游戏HUD
-│   │   ├── MenuUI.ts           # 主菜单
+│   │   ├── MenuUI.ts           # 主菜单（含主题切换按钮）
+│   │   ├── ThemeSelectUI.ts    # Phase 7 主题选择界面
 │   │   └── InputHandler.ts     # 输入处理
 │   ├── types/
-│   │   └── index.ts            # 类型定义
+│   │   ├── index.ts            # 核心类型定义
+│   │   └── theme.ts            # Phase 7 主题类型定义
 │   ├── config/
 │   │   ├── gameConfig.ts       # 游戏配置
-│   │   └── aiConfig.ts         # AI配置
+│   │   ├── aiConfig.ts         # AI配置
+│   │   └── themes/
+│   │       ├── classicTheme.ts # Phase 7 经典主题配置
+│   │       ├── catTheme.ts     # Phase 8 猫咪主题配置
+│   │       └── mechaTheme.ts   # Phase 9 机甲主题配置
 │   └── utils/
 │       ├── timer.ts            # 计时器
 │       └── storage.ts          # localStorage封装
 ├── public/
 │   ├── index.html
-│   └── favicon.ico
+│   ├── favicon.ico
+│   └── assets/
+│       └── themes/             # Phase 8-9 主题素材
+│           ├── classic/
+│           ├── cat/
+│           └── mecha/
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
@@ -1390,6 +2172,11 @@ mistakeRate = 0 并不等于"完美决策"
 | Three.js学习曲线 | 低 | 模块化设计，渲染层与逻辑层分离 |
 | localStorage容量限制 | 低 | 战绩数据极小（<1KB），无风险 |
 | 浏览器性能差异 | 中 | 性能测试，控制粒子数量，限制渲染复杂度 |
+| 找不到带完整动画的3D模型 | 高 | 免费素材 + AI生成 + 代码动画兜底（ADR-012） |
+| 主题动画阻塞渲染帧率 | 中 | requestAnimationFrame + 状态缓存 + 简化动画 |
+| PieceStateManager状态冲突 | 中 | 状态转换表 + 单元测试 |
+| 多主题素材加载时间长 | 中 | 预加载 + 缓存 + 加载进度提示 |
+| 素材内存占用过大 | 低 | 控制模型大小，单主题≤10MB |
 
 ---
 
@@ -1397,10 +2184,11 @@ mistakeRate = 0 并不等于"完美决策"
 
 - [x] 架构设计完成
 - [x] 技术选型确定
-- [x] 模块设计完成
-- [x] 接口定义完成
+- [x] 模块设计完成（含 Phase 7-9 主题系统）
+- [x] 接口定义完成（含新模块集成接口）
 - [x] 视觉风格同步更新
 - [ ] 已移交给 Dev Agent
+- [ ] Phase 7-9 主题系统待实现
 - [ ] 禁止后续修改（除非正式变更流程）
 
 ---
@@ -1697,5 +2485,69 @@ private sortCandidates(...): { x: number; y: number }[] {
 
 ---
 
-**版本**：v1.3
-**最后更新**：2026-04-24（添加ADR-011 AI评估系统统一架构设计）
+### ADR-012：动画实现方案选择（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：采用代码动画为主 + 模型自带动画可选
+
+**理由**：
+1. 代码动画实现可控，不依赖素材质量
+2. 免费素材几乎不可能带"炸毛""翻身露肚皮"等特定动画
+3. 经典主题全部用代码动画（无模型，纯几何体）
+4. 猫咪/机甲主题：模型仅用于姿态展示，动画效果通过代码实现
+
+### ADR-013：素材组织方案（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：多模型文件（活跃/休眠分离），黑白共用模型运行时改色
+
+**理由**：
+- 猫咪/机甲的活跃/休眠姿态差异太大，无法用同一模型实现
+- 使用多模型文件，切换时替换 Mesh
+- 黑白共用模型减少 50% 模型数量（8个→4个）
+
+### ADR-014：状态管理方案（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：中央状态机（PieceStateManager）管理所有棋子状态
+
+**设计要点**：
+1. PieceStateManager 中央管理所有棋子状态
+2. 每颗棋子缓存当前状态（避免每次查询）
+3. 状态转换由事件触发（覆盖/悬停/下落）
+
+### ADR-015：下落动画己方/对方区分（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：下落动画增加己方/对方区分配置（机甲举盾/举剑需求）
+
+**接口变更**：AnimationThemeConfig.fall 增加 own/opponent 字段
+
+### ADR-016：主题化交互高亮颜色（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：所有交互高亮颜色从 ThemeConfig 读取，替代原硬编码颜色
+
+**解决冲突**：原 hover-highlight-spec.md 中 `#3d9eff` 硬编码改为每主题独立配置
+
+### ADR-017：经典主题苹果风格设计（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：经典主题采用苹果风格设计（毛玻璃底座 + 高光材质 + 边缘光晕 + 浅灰渐变）
+
+### ADR-018：猫咪/机甲主题完整视觉规格（Phase 7 主题系统）
+
+**状态**：已采纳
+
+**决策**：猫咪主题暖色（木纹+暖橘），机甲主题冷色（金属+冰蓝），差异化明显
+
+---
+
+**版本**：v2.0
+**最后更新**：2026-04-27（添加 Phase 7-9 主题系统模块设计与ADR-012~018）

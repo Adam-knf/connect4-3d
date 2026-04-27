@@ -423,6 +423,7 @@ export interface PieceMesh {
   player: Player;            // 所属玩家
   state: PieceState;         // 当前状态
   isActive: boolean;         // 是否活跃（顶层）
+  isOwn: boolean;            // 是否己方棋子（用于动画区分）
 }
 
 // ==================== 主题预览UI类型 ====================
