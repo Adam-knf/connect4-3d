@@ -2,22 +2,27 @@
  * StatsStore 单元测试
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { StatsStore } from '@/core/StatsStore';
 
-const makeMockStorage = () => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-    removeItem: vi.fn((key: string) => { delete store[key]; }),
-    clear: vi.fn(() => { store = {}; }),
-  };
-};
+const storage: Record<string, string> = {};
 
 describe('StatsStore', () => {
   beforeEach(() => {
-    vi.stubGlobal('localStorage', makeMockStorage());
+    // 清空 mock storage
+    Object.keys(storage).forEach(k => delete storage[k]);
+
+    // 每个测试前重新注入 localStorage mock
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage[key] ?? null,
+        setItem: (key: string, value: string) => { storage[key] = value; },
+        removeItem: (key: string) => { delete storage[key]; },
+        clear: () => { Object.keys(storage).forEach(k => delete storage[k]); },
+      },
+      writable: true,
+      configurable: true,
+    });
   });
 
   describe('初始化', () => {
@@ -39,8 +44,7 @@ describe('StatsStore', () => {
       expect(stats.total.rate).toBe(0);
     });
 
-    it('test_load_from localStorage_should_work', () => {
-      // 预先设置 localStorage 数据
+    it('test_load_from_localStorage_should_work', () => {
       localStorage.setItem('connect4_3d_stats', JSON.stringify({
         easy: { wins: 5, losses: 3 },
         medium: { wins: 2, losses: 4 },
@@ -157,7 +161,6 @@ describe('StatsStore', () => {
     it('test_win_rate_should_round_correctly', () => {
       const store = new StatsStore();
 
-      // 1 win, 2 losses = 1/3 = 33.33% -> 33%
       store.update('EASY', 'WIN');
       store.update('EASY', 'LOSS');
       store.update('EASY', 'LOSS');
@@ -179,14 +182,13 @@ describe('StatsStore', () => {
 
       const stats = store.getStats();
 
-      expect(stats.total.wins).toBe(3); // 2 + 1 + 0
-      expect(stats.total.losses).toBe(2); // 0 + 1 + 1
+      expect(stats.total.wins).toBe(3);
+      expect(stats.total.losses).toBe(2);
     });
 
     it('test_total_rate_should_be_accurate', () => {
       const store = new StatsStore();
 
-      // 总计：3 wins, 3 losses = 50%
       store.update('EASY', 'WIN');
       store.update('EASY', 'WIN');
       store.update('MEDIUM', 'WIN');
@@ -242,7 +244,6 @@ describe('StatsStore', () => {
       store.update('EASY', 'WIN');
       store.update('MEDIUM', 'LOSS');
 
-      // 模拟页面刷新（重新创建实例）
       const store2 = new StatsStore();
       const stats = store2.getStats();
 
@@ -255,7 +256,6 @@ describe('StatsStore', () => {
     it('test_many_games_should_not_overflow', () => {
       const store = new StatsStore();
 
-      // 进行 100 场游戏
       for (let i = 0; i < 50; i++) {
         store.update('EASY', 'WIN');
       }

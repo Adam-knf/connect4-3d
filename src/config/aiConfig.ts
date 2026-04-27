@@ -68,8 +68,8 @@ export const DIFFICULTY_CONFIGS: Record<Difficulty, DifficultyConfig> = {
   },
 
   MEDIUM: {
-    depth: 3,            
-    mistakeRate: 0,      
+    depth: 4,            
+    mistakeRate: 0.15,      
     layers: {
       enableImmediateWin: true,
       enableBasicThreat: true,

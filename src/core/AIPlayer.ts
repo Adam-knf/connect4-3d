@@ -206,14 +206,16 @@ export class AIPlayer {
       const selfWin = WinChecker.quickWouldWinFast(board, pos, this.aiPiece);
       if (selfWin) {
         console.log(`[AI Debug]   -> Layer0: 立即获胜!`);
-        return EVAL_SCORES.WIN;
+        // 最高分：WIN + maxDepth*1000 + 1000，确保不被任何Minimax分数超过
+        return EVAL_SCORES.WIN + this.config.depth * 1000 + 1000;
       }
 
       // 对方立即获胜（需阻挡）
       const opponentWin = WinChecker.quickWouldWinFast(board, pos, this.opponentPiece);
       if (opponentWin) {
         console.log(`[AI Debug]   -> Layer0: 阻挡对手获胜!`);
-        return EVAL_SCORES.BLOCK_WIN;
+        // 最高阻挡分：同上逻辑
+        return EVAL_SCORES.BLOCK_WIN + this.config.depth * 1000 + 1000;
       }
     }
 
@@ -268,6 +270,20 @@ export class AIPlayer {
       console.log(`[AI Debug]   -> Layer3 fork score: ${layer3Score}`);
     }
 
+    // ==================== Opponent Double-Open Threat Check ====================
+    // 检查放置后对手是否有两端开放威胁（2连或3连）
+    // 独立于Minimax运行，防止地平线效应导致AI在深度不足时忽略对手的必胜威胁
+    let oppDoubleOpenPenalty = 0;
+
+    if (this.config.layers.enableAdvancedThreat) {
+      const clonedBoard = board.clone();
+      clonedBoard.setPiece(pos, this.aiPiece);
+      oppDoubleOpenPenalty = this.evaluateOpponentDoubleOpenThreat(clonedBoard);
+      if (oppDoubleOpenPenalty !== 0) {
+        console.log(`[AI Debug]   -> Opponent double-open penalty: ${oppDoubleOpenPenalty}`);
+      }
+    }
+
     // ==================== Layer 4 ====================
     // Minimax深度搜索（MEDIUM/HARD启用）
     if (this.config.layers.enableMinimaxSearch && this.config.depth > 1) {
@@ -281,16 +297,16 @@ export class AIPlayer {
         Infinity,
         false
       );
-      // Minimax + Layer 1/2/3 分数
-      const totalScore = minimaxScore + layer1Score + layer2Score + layer3Score;
-      console.log(`[AI Debug]   -> Layer4 minimax: ${minimaxScore}, total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score})`);
+      // Minimax + Layer 1/2/3 + double-open penalty
+      const totalScore = minimaxScore + layer1Score + layer2Score + layer3Score + oppDoubleOpenPenalty;
+      console.log(`[AI Debug]   -> Layer4 minimax: ${minimaxScore}, total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score}, oppDO=${oppDoubleOpenPenalty})`);
       return totalScore;
     }
 
     // 深度为1或无Minimax时，返回静态评估
     const staticScore = this.staticEvaluate(board, pos);
-    const totalScore = layer1Score + layer2Score + layer3Score + staticScore;
-    console.log(`[AI Debug]   -> Static total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score}, base=${staticScore})`);
+    const totalScore = layer1Score + layer2Score + layer3Score + oppDoubleOpenPenalty + staticScore;
+    console.log(`[AI Debug]   -> Static total: ${totalScore} (L1=${layer1Score}, L2=${layer2Score}, L3=${layer3Score}, oppDO=${oppDoubleOpenPenalty}, base=${staticScore})`);
     return totalScore;
   }
 
@@ -312,8 +328,11 @@ export class AIPlayer {
       const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
       const oppCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
 
-      // ===== 己方3连威胁 =====
-      if (oppCount === 0 && aiCount === 3 && line.openEnds > 0) {
+      // 放置后的己方棋子数（同Layer 2逻辑）
+      const aiCountAfter = (oppCount === 0) ? aiCount + 1 : aiCount;
+
+      // ===== 己方3连威胁（放置后形成3连） =====
+      if (oppCount === 0 && aiCountAfter === 3 && line.openEnds > 0) {
         score += EVAL_SCORES.THREE_OWN;  // 150
       }
 
@@ -666,7 +685,21 @@ export class AIPlayer {
     let aiLinesWithExt = 0;
     let oppLinesWithExt = 0;
 
-    for (const line of allLines) {
+    // 两端开放威胁计数
+    let aiDoubleOpenThree = 0;   // 己方两端开放3连（必胜）
+    let oppDoubleOpenThree = 0;  // 对手两端开放3连（必胜）
+    let aiDoubleOpenTwo = 0;     // 己方两端开放2连（强发展威胁）
+    let oppDoubleOpenTwo = 0;    // 对手两端开放2连（强发展威胁）
+
+    // 按棋子数降序排序，确保同一物理线上高严重度段优先处理
+    // 防止2连段先被去重导致3连段被忽略
+    const sortedLines = [...allLines].sort((a, b) => {
+ 
+      const aMax = Math.max(a.blackCount, a.whiteCount);
+      const bMax = Math.max(b.blackCount, b.whiteCount);
+      return bMax - aMax;
+    });
+    for (const line of sortedLines) {
       if (line.blackCount === 0 && line.whiteCount === 0) continue;
 
       const aiCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
@@ -682,11 +715,19 @@ export class AIPlayer {
         if (!seenAiKeys.has(physKey)) {
           seenAiKeys.add(physKey);
           if (aiCount >= 3) {
-            aiThreeLines++;
+            if (oppCount === 0) {
+              aiThreeLines++;  // 纯3连才计数
+              // 检测两端开放3连（必胜威胁）
+              const openEnds = this.countBlockOpenEnds(line, board, this.aiPiece, boardSize);
+              if (openEnds >= 2) aiDoubleOpenThree++;
+            }
           } else if (aiCount === 2) {
             // 只计有扩展点的2连（findExtensionCells自动验证连续性+可下性）
             const cells = this.findExtensionCells(line, board, this.aiPiece, boardSize);
-            if (cells.length > 0) aiLinesWithExt++;
+            if (cells.length > 0) {
+              aiLinesWithExt++;
+              if (cells.length >= 2) aiDoubleOpenTwo++;  // 两端开放2连
+            }
           }
         }
       }
@@ -696,10 +737,18 @@ export class AIPlayer {
         if (!seenOppKeys.has(physKey)) {
           seenOppKeys.add(physKey);
           if (oppCount >= 3) {
-            oppThreeLines++;
+            if (aiCount === 0) {
+              oppThreeLines++;  // 纯3连才计数
+              // 检测两端开放3连（必胜威胁）
+              const openEnds = this.countBlockOpenEnds(line, board, this.opponentPiece, boardSize);
+              if (openEnds >= 2) oppDoubleOpenThree++;
+            }
           } else if (oppCount === 2) {
             const cells = this.findExtensionCells(line, board, this.opponentPiece, boardSize);
-            if (cells.length > 0) oppLinesWithExt++;
+            if (cells.length > 0) {
+              oppLinesWithExt++;
+              if (cells.length >= 2) oppDoubleOpenTwo++;  // 两端开放2连
+            }
           }
         }
       }
@@ -707,6 +756,20 @@ export class AIPlayer {
 
     // ===== 扩展点递进评分 =====
     let score = 0;
+
+    // ===== 两端开放3连（必胜威胁）=====
+    // 一条物理线上连续3子两端均可延伸 → 对手只能堵一端，必输
+    if (aiDoubleOpenThree >= 1) score += EVAL_SCORES.DOUBLE_THREAT_OWN;    // +500
+    if (oppDoubleOpenThree >= 1) score -= EVAL_SCORES.DOUBLE_THREAT_BLOCK; // -1000
+
+    // ===== 两端开放2连（强发展威胁）=====
+    // 连续2子两端均可延伸 → 下一手变两端开放3连（必胜）
+    if (aiDoubleOpenTwo >= 1) score += EVAL_SCORES.TWO_OWN * 8;            // +160
+    if (oppDoubleOpenTwo >= 1) score -= EVAL_SCORES.TWO_BLOCK * 8;         // -320
+
+    // 单3连威胁（近胜利威胁）
+    if (aiThreeLines === 1) score += EVAL_SCORES.THREE_OWN;
+    if (oppThreeLines === 1) score -= EVAL_SCORES.THREE_BLOCK;
 
     // 双3连威胁（直接致命，无需扩展点检查）
     if (aiThreeLines >= 2) score += EVAL_SCORES.DOUBLE_THREAT_OWN;
@@ -729,7 +792,7 @@ export class AIPlayer {
     }
 
     if (score !== 0) {
-      console.log(`[AI Debug]     internalNode: ai=${aiLinesWithExt} ai3=${aiThreeLines} opp=${oppLinesWithExt} opp3=${oppThreeLines} bonus=${score > 0 ? '+' : ''}${score}`);
+      console.log(`[AI Debug]     internalNode: ai=${aiLinesWithExt} ai3=${aiThreeLines} aiDO3=${aiDoubleOpenThree} aiDO2=${aiDoubleOpenTwo} opp=${oppLinesWithExt} opp3=${oppThreeLines} oppDO3=${oppDoubleOpenThree} oppDO2=${oppDoubleOpenTwo} bonus=${score > 0 ? '+' : ''}${score}`);
     }
     return score;
   }
@@ -801,6 +864,117 @@ export class AIPlayer {
   }
 
   /**
+   * 计算线段中连续棋子块的开放端数量
+   *
+   * 基于连续块的端点（而非segment边界）检查两端延伸是否可下。
+   * 用于检测"两端开放3连"（必胜威胁）和"两端开放2连"（强发展威胁）。
+   *
+   * 示例：segment(2,0)-(2,3) 方向(0,1,0)
+   *  [E, B, B, B] → blockStart=1, blockEnd=3
+   *  backward=(2,0) playable, forward=(2,4) playable → 返回2
+   *
+   * @param line 4连段记录
+   * @param board 棋盘状态
+   * @param player 玩家
+   * @param boardSize 棋盘尺寸
+   * @returns 开放端数量 (0/1/2)，无连续块返回-1
+   */
+  private countBlockOpenEnds(
+    line: LineRecord,
+    board: Board,
+    player: Player,
+    boardSize: { width: number; height: number }
+  ): number {
+    const positions = line.positions;
+    const dir = line.direction;
+
+    // 找连续块起始和结束索引
+    let blockStart = -1;
+    let blockEnd = -1;
+
+    for (let i = 0; i < positions.length; i++) {
+      const piece = board.getPiece(positions[i]);
+      if (piece === player) {
+        if (blockStart === -1) blockStart = i;
+        blockEnd = i;
+      } else if (blockStart >= 0) {
+        break; // 遇到第一个非本方棋子，连续块结束
+      }
+    }
+
+    if (blockStart === -1) return -1;
+    const blockLen = blockEnd - blockStart + 1;
+    if (blockLen < 2) return -1;
+
+    // 后方延伸（块起始位置沿反方向）
+    let count = 0;
+    const backward: Position = {
+      x: positions[blockStart].x - dir.x,
+      y: positions[blockStart].y - dir.y,
+      z: positions[blockStart].z - dir.z,
+    };
+    if (this.isPlayableAt(backward, board, boardSize)) count++;
+
+    // 前方延伸（块结束位置沿正方向）
+    const forward: Position = {
+      x: positions[blockEnd].x + dir.x,
+      y: positions[blockEnd].y + dir.y,
+      z: positions[blockEnd].z + dir.z,
+    };
+    if (this.isPlayableAt(forward, board, boardSize)) count++;
+
+    return count;
+  }
+
+  /**
+   * 评估放置后对手的两端开放威胁
+   *
+   * 在AI落子后扫描全局，检测对手是否有两端开放的2连或3连。
+   * 两端开放2连 → 对手下一手变成两端开放3连（必胜）
+   * 两端开放3连 → 对手已经必胜
+   *
+   * 此检查独立于Minimax运行，防止地平线效应导致AI在深度不足时忽略对手的必胜威胁。
+   *
+   * @param board 放置AI棋子后的棋盘
+   * @returns 惩罚分数（负数）
+   */
+  private evaluateOpponentDoubleOpenThreat(board: Board): number {
+    const allLines = board.getAllLineRecords();
+    const boardSize = board.getSize();
+    const seenKeys = new Set<string>();
+    let penalty = 0;
+
+    for (const line of allLines) {
+      if (line.blackCount === 0 && line.whiteCount === 0) continue;
+
+      const aiCount = this.aiPiece === 'BLACK' ? line.whiteCount : line.blackCount;
+      const oppCount = this.aiPiece === 'BLACK' ? line.blackCount : line.whiteCount;
+
+      // 只需检查对手的威胁，且需是纯净的（不含AI棋子）
+      if (oppCount < 2) continue;
+      if (aiCount > 0) continue;
+
+      const physKey = LineIndex.getPhysicalLineKey(line, boardSize.width, boardSize.height);
+      if (seenKeys.has(physKey)) continue;
+      seenKeys.add(physKey);
+
+      if (oppCount >= 3) {
+        const openEnds = this.countBlockOpenEnds(line, board, this.opponentPiece, boardSize);
+        if (openEnds >= 2) {
+          penalty -= EVAL_SCORES.DOUBLE_THREAT_BLOCK; // -1000
+        }
+      } else if (oppCount === 2) {
+        const openEnds = this.countBlockOpenEnds(line, board, this.opponentPiece, boardSize);
+        if (openEnds >= 2) {
+          penalty -= EVAL_SCORES.TWO_BLOCK * 8; // -320
+        }
+      }
+    }
+
+    return penalty;
+  }
+
+  /**
    * 检查位置是否可落子
    * 三个条件：
    *   1. 坐标在棋盘范围内
@@ -862,10 +1036,13 @@ export class AIPlayer {
     // 检测游戏是否结束
     const winResult = board.checkWinWithIndex();
     if (winResult) {
+      // depth越大 = WIN发生越早 = 步数越少 = 分数越高
+      // depth=3: 1步后赢 → WIN+3000
+      // depth=1: 3步后赢 → WIN+1000
       if (winResult.winner === this.aiPiece) {
-        return EVAL_SCORES.WIN;
+        return EVAL_SCORES.WIN + depth * 1000;
       } else {
-        return -EVAL_SCORES.WIN;
+        return -(EVAL_SCORES.WIN + depth * 1000);
       }
     }
 

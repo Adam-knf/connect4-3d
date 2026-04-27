@@ -52,7 +52,7 @@ export class StatsStore {
     } catch (e) {
       console.warn('[StatsStore] Failed to load stats from localStorage:', e);
     }
-    return { ...DEFAULT_STATS };
+    return JSON.parse(JSON.stringify(DEFAULT_STATS));
   }
 
   /**
@@ -159,7 +159,7 @@ export class StatsStore {
    * 清空战绩数据
    */
   clear(): void {
-    this.stats = { ...DEFAULT_STATS };
+    this.stats = JSON.parse(JSON.stringify(DEFAULT_STATS));
     this.saveToStorage();
     console.log('[StatsStore] Stats cleared');
   }

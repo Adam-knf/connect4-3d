@@ -226,9 +226,10 @@ export class GameController {
 
     switch (newState) {
       case 'PLAYER_TURN':
-        // 玩家回合：启用输入
+        // 玩家回合：启用输入和点击
         console.log('[GameController] PLAYER_TURN: enabling input');
         this.enableInput();
+        this.inputHandler.enableClick();  // 启用左键点击
         // 通知回合更新
         this.notifyUIUpdate('turn', { player: this.state.getCurrentTurn(), isAI: false });
         this.notifyUIUpdate('aiThinking', false);
@@ -287,6 +288,9 @@ export class GameController {
       this.inputHandler.refreshHoverState();
       return;
     }
+
+    // 确认可下后立即屏蔽点击，防止连点
+    this.inputHandler.disableClick();
 
     // 获取当前玩家棋子
     const playerPiece = this.state.getPlayerPiece();

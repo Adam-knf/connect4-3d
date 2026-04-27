@@ -53,8 +53,11 @@ export class InputHandler {
   /** 右键状态回调 */
   private onRightButton: RightButtonCallback | null = null;
 
-  /** 是否启用 */
+  /** 是否启用（全局） */
   private enabled: boolean;
+
+  /** 点击是否禁用（单独控制左键点击，不影响右键和悬停） */
+  private clickDisabled: boolean;
 
   /** 当前悬停位置 */
   private currentHover: { x: number; y: number } | null = null;
@@ -89,6 +92,7 @@ export class InputHandler {
     this.mouse = new THREE.Vector2();
     this.clickableMeshes = [];
     this.enabled = true;
+    this.clickDisabled = true;  // 默认禁用点击，进入玩家回合才启用
 
     // 保存绑定后的函数引用（用于正确解绑）
     this.boundHandleClick = this.handleClick.bind(this);
@@ -180,6 +184,7 @@ export class InputHandler {
    */
   private handleClick(event: MouseEvent): void {
     if (!this.enabled) return;
+    if (this.clickDisabled) return;  // 点击被屏蔽时忽略左键
     if (event.button !== 0) return;  // 只响应左键
 
     // 更新鼠标位置
@@ -353,6 +358,29 @@ export class InputHandler {
    */
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /**
+   * 启用左键点击（进入玩家回合时调用）
+   */
+  enableClick(): void {
+    this.clickDisabled = false;
+    console.log('[InputHandler] Click enabled');
+  }
+
+  /**
+   * 禁用左键点击（点击确认可下后立即调用，防止连点）
+   */
+  disableClick(): void {
+    this.clickDisabled = true;
+    console.log('[InputHandler] Click disabled');
+  }
+
+  /**
+   * 点击是否启用
+   */
+  isClickEnabled(): boolean {
+    return !this.clickDisabled;
   }
 
   /**
