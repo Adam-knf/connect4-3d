@@ -49,18 +49,7 @@ export class WinChecker {
     return board.getThreatPositions(player);
   }
 
-  /**
-   * 获取局势评估分数
-   * 使用四连索引计算威胁评估
-   * @param board 棋盘实例
-   * @param player 当前视角玩家
-   * @returns 评估分数
-   */
-  static evaluateFast(board: Board, player: Player): number {
-    return board.getEvaluationScore(player);
-  }
-
-  // ==================== 传统扫描方法（兼容保留） ====================
+  // ==================== 传统扫描方法 ====================
   /**
    * 检查是否有获胜连线
    * @param board 棋盘实例

@@ -5,7 +5,6 @@
 
 import type { Position, Vector3, Player, WinResult, LineRecord } from '@/types';
 import { WIN_LINE_LENGTH } from '@/types';
-import { EVAL_SCORES } from '@/config/aiConfig';
 
 // 导出 LineRecord 类型（供外部使用）
 export type { LineRecord } from '@/types';
@@ -40,11 +39,8 @@ export class LineIndex {
   private width: number;
   private height: number;
 
-  /** 获取棋子状态的回调函数（用于计算开放端） */
-  private getPieceAt: ((pos: Position) => Player) | null = null;
-
   /** 更新历史栈（用于回溯） */
-  private updateStack: { lineId: number; player: Player; delta: number; oldOpenEnds: number; oldReadyEnds: number }[];
+  private updateStack: { lineId: number; player: Player; delta: number }[];
 
   /**
    * 构造函数
@@ -59,91 +55,6 @@ export class LineIndex {
     this.updateStack = [];
 
     this.precomputeLines();
-  }
-
-  /**
-   * 设置获取棋子状态的回调函数
-   * 必须在 Board 创建 LineIndex 后调用，用于计算开放端
-   * @param callback 回调函数
-   */
-  setGetPieceAt(callback: (pos: Position) => Player): void {
-    this.getPieceAt = callback;
-  }
-
-  /**
-   * 计算一条线的开放端信息
-   * @param line 4连记录
-   * @returns { openEnds: 开放端数量, readyEnds: 可立即下的开放端数量 }
-   */
-  private calculateOpenEnds(line: LineRecord): { openEnds: number; readyEnds: number } {
-    // 没有回调时，返回默认值（初始状态）
-    if (!this.getPieceAt) {
-      return { openEnds: 2, readyEnds: 0 };
-    }
-
-    const dir = line.direction;
-    const positions = line.positions;
-
-    // 计算两端的延伸位置
-    // 前端：positions[0] 向前延伸一格（-dir）
-    // 后端：positions[3] 向后延伸一格（+dir）
-    const frontExtend: Position = {
-      x: positions[0].x - dir.x,
-      y: positions[0].y - dir.y,
-      z: positions[0].z - dir.z,
-    };
-    const backExtend: Position = {
-      x: positions[3].x + dir.x,
-      y: positions[3].y + dir.y,
-      z: positions[3].z + dir.z,
-    };
-
-    let openEnds = 0;
-    let readyEnds = 0;
-
-    // 检查前端
-    if (this.isValidPosition(frontExtend)) {
-      const frontPiece = this.getPieceAt(frontExtend);
-      if (frontPiece === 'EMPTY') {
-        openEnds++;
-        // 检查是否可立即下（底层有棋子或本身在底层）
-        if (frontExtend.z === 0) {
-          readyEnds++;  // 底层位置可以直接下
-        } else {
-          const belowFront: Position = {
-            x: frontExtend.x,
-            y: frontExtend.y,
-            z: frontExtend.z - 1,
-          };
-          if (this.getPieceAt(belowFront) !== 'EMPTY') {
-            readyEnds++;  // 底层有棋子，可以立即下
-          }
-        }
-      }
-    }
-
-    // 检查后端
-    if (this.isValidPosition(backExtend)) {
-      const backPiece = this.getPieceAt(backExtend);
-      if (backPiece === 'EMPTY') {
-        openEnds++;
-        // 检查是否可立即下
-        if (backExtend.z === 0) {
-          readyEnds++;  // 底层位置可以直接下
-        } else {
-          const belowBack: Position = {
-            x: backExtend.x,
-            y: backExtend.y,
-            z: backExtend.z - 1,
-          };
-          if (this.getPieceAt(belowBack) !== 'EMPTY') {
-            readyEnds++;  // 底层有棋子，可以立即下
-          }
-        }
-      }
-    }
-
-    return { openEnds, readyEnds };
   }
 
   /**
@@ -182,16 +93,17 @@ export class LineIndex {
           for (const dir of directions) {
             const positions = this.tryCreateLine({ x, y, z }, dir);
             if (positions) {
-              // 创建记录（初始状态：开放端2，可立即下0，需要在setGetPieceAt后更新）
+              // 创建记录
               const record: LineRecord = {
                 id: lineId,
                 positions,
                 direction: dir,
                 blackCount: 0,
                 whiteCount: 0,
-                openEnds: 2,  // 默认两端开放
-                readyEnds: 0, // 默认不可立即下（需等待棋盘状态）
+                physKey: '',
               };
+              // 预计算物理线去重键，避免运行时 while 回溯
+              record.physKey = LineIndex.computePhysKey(record, this.width, this.height);
               this.lines.push(record);
 
               // 建立位置映射
@@ -282,18 +194,13 @@ export class LineIndex {
    */
   updateOnPlace(pos: Position, player: Player): WinResult | null {
     const lineIds = this.getLineIdsAtPosition(pos);
+    let winResult: WinResult | null = null;
 
     for (const lineId of lineIds) {
       const line = this.lines[lineId];
 
       // 记录更新历史（用于回溯）
-      this.updateStack.push({
-        lineId,
-        player,
-        delta: 1,
-        oldOpenEnds: line.openEnds,
-        oldReadyEnds: line.readyEnds,
-      });
+      this.updateStack.push({ lineId, player, delta: 1 });
 
       // 更新计数
       if (player === 'BLACK') {
@@ -302,27 +209,24 @@ export class LineIndex {
         line.whiteCount++;
       }
 
-      // 重新计算开放端信息
-      const openInfo = this.calculateOpenEnds(line);
-      line.openEnds = openInfo.openEnds;
-      line.readyEnds = openInfo.readyEnds;
-
-      // 检测是否获胜
-      if (line.blackCount === WIN_LINE_LENGTH) {
-        return {
-          winner: 'BLACK',
-          linePositions: line.positions,
-        };
-      }
-      if (line.whiteCount === WIN_LINE_LENGTH) {
-        return {
-          winner: 'WHITE',
-          linePositions: line.positions,
-        };
+      // 检测是否获胜（不提前 return，确保所有线计数一致）
+      // BUGFIX: 提前 return 会导致 undoOnRemove 递减了未递增的线，使计数变为负数
+      if (!winResult) {
+        if (line.blackCount === WIN_LINE_LENGTH) {
+          winResult = {
+            winner: 'BLACK',
+            linePositions: line.positions,
+          };
+        } else if (line.whiteCount === WIN_LINE_LENGTH) {
+          winResult = {
+            winner: 'WHITE',
+            linePositions: line.positions,
+          };
+        }
       }
     }
 
-    return null;
+    return winResult;
   }
 
   /**
@@ -343,11 +247,6 @@ export class LineIndex {
       } else if (player === 'WHITE') {
         line.whiteCount--;
       }
-
-      // 重新计算开放端信息（棋盘状态已变化）
-      const openInfo = this.calculateOpenEnds(line);
-      line.openEnds = openInfo.openEnds;
-      line.readyEnds = openInfo.readyEnds;
 
       // 弹出对应的更新记录
       // 从栈顶找到匹配的记录并移除
@@ -513,9 +412,6 @@ export class LineIndex {
     for (const line of this.lines) {
       line.blackCount = 0;
       line.whiteCount = 0;
-      // 重置开放端为默认值（需要重新计算）
-      line.openEnds = 2;
-      line.readyEnds = 0;
     }
     this.updateStack = [];
   }
@@ -526,18 +422,14 @@ export class LineIndex {
   clone(): LineIndex {
     const newIndex = new LineIndex(this.width, this.height);
 
-    // 复制计数状态和开放端信息
+    // 复制计数状态
     for (let i = 0; i < this.lines.length; i++) {
       newIndex.lines[i].blackCount = this.lines[i].blackCount;
       newIndex.lines[i].whiteCount = this.lines[i].whiteCount;
-      newIndex.lines[i].openEnds = this.lines[i].openEnds;
-      newIndex.lines[i].readyEnds = this.lines[i].readyEnds;
     }
 
     // 复制更新栈
     newIndex.updateStack = this.updateStack.map(r => ({ ...r }));
-
-    // 注意：getPieceAt 回调需要在外部设置（指向新的 Board）
 
     return newIndex;
   }
@@ -568,10 +460,20 @@ export class LineIndex {
    * 沿着方向反向走到棋盘边界，得到 canonical 起点
    * 同一物理直线上的所有4连段共享同一个 key
    */
-  static getPhysicalLineKey(line: LineRecord, width: number, height: number): string {
+  static getPhysicalLineKey(line: LineRecord, _width?: number, _height?: number): string {
+    // v2: 直接返回预计算值，避免运行时 while 回溯
+    // 兼容旧调用方式（width/height 参数不再需要，但保留避免编译错误）
+    if (line.physKey) return line.physKey;
+    // fallback: 旧 LineRecord 无 physKey 时运行时计算（过渡期兼容）
+    return LineIndex.computePhysKey(line, _width ?? 5, _height ?? 6);
+  }
+
+  /**
+   * 计算物理线去重键（v2新增，供预计算使用）
+   */
+  static computePhysKey(line: LineRecord, width: number, height: number): string {
     const dir = line.direction;
     const firstPos = line.positions[0];
-    // 沿相反方向走到边界
     let sx = firstPos.x;
     let sy = firstPos.y;
     let sz = firstPos.z;
@@ -585,211 +487,5 @@ export class LineIndex {
       sz -= dir.z;
     }
     return `${dir.x},${dir.y},${dir.z}:${sx},${sy},${sz}`;
-  }
-
-  /**
-   * 获取评估分数（用于AI评估函数）
-   * 区分"同时多威胁"和"非同时多威胁"
-   * - 同时多威胁（多条线共享同一个空位）：正常累加
-   * - 非同时多威胁（不同空位）：开根号降低价值
-   */
-  getEvaluationScore(player: Player, debug: boolean = false): number {
-    // 收集威胁线信息
-    const playerThreats: { lineScore: number; emptyPos: Position | null; count: number }[] = [];
-    const opponentThreats: { lineScore: number; emptyPos: Position | null; count: number }[] = [];
-
-    // 多威胁叠加统计（2连、3连）
-    let playerTwoInRow = 0;
-    let playerThreeInRow = 0;
-    let opponentTwoInRow = 0;
-    let opponentThreeInRow = 0;
-
-    // 物理线去重：同一物理直线上的重叠段只计1次
-    const seenPlayerLines = new Set<string>();
-    const seenOpponentLines = new Set<string>();
-
-    for (const line of this.lines) {
-      const playerCount = player === 'BLACK' ? line.blackCount : line.whiteCount;
-      const opponentCount = player === 'BLACK' ? line.whiteCount : line.blackCount;
-
-      // 己方威胁线
-      if (opponentCount === 0 && playerCount > 0 && line.openEnds > 0) {
-        const physKey = LineIndex.getPhysicalLineKey(line, this.width, this.height);
-        if (!seenPlayerLines.has(physKey)) {
-          seenPlayerLines.add(physKey);
-          const lineScore = this.calculateLineScore(playerCount, line.openEnds, line.readyEnds, true);
-          const emptyPos = this.findEmptyPositionInLine(line);
-          playerThreats.push({ lineScore, emptyPos, count: playerCount });
-
-          if (playerCount === 2) playerTwoInRow++;
-          if (playerCount === 3) playerThreeInRow++;
-        }
-      }
-
-      // 对方威胁线
-      if (playerCount === 0 && opponentCount > 0 && line.openEnds > 0) {
-        const physKey = LineIndex.getPhysicalLineKey(line, this.width, this.height);
-        if (!seenOpponentLines.has(physKey)) {
-          seenOpponentLines.add(physKey);
-          const lineScore = this.calculateLineScore(opponentCount, line.openEnds, line.readyEnds, false);
-          const emptyPos = this.findEmptyPositionInLine(line);
-          opponentThreats.push({ lineScore, emptyPos, count: opponentCount });
-
-          if (opponentCount === 2) opponentTwoInRow++;
-          if (opponentCount === 3) opponentThreeInRow++;
-        }
-      }
-    }
-
-    // 计算得分：区分同时多威胁和非同时多威胁
-    const playerScore = this.calculateThreatGroupScore(playerThreats);
-    const opponentScore = this.calculateThreatGroupScore(opponentThreats);
-
-    let score = playerScore - opponentScore;
-
-    // 多威胁叠加加分（2连、3连的特殊情况）
-    if (playerTwoInRow >= 2) score += EVAL_SCORES.POTENTIAL_DOUBLE_OWN * (playerTwoInRow - 1);
-    if (opponentTwoInRow >= 2) score -= EVAL_SCORES.POTENTIAL_DOUBLE_BLOCK * (opponentTwoInRow - 1);
-    if (playerThreeInRow >= 2) score += EVAL_SCORES.DOUBLE_THREAT_OWN;
-    if (opponentThreeInRow >= 2) score -= EVAL_SCORES.DOUBLE_THREAT_BLOCK;
-
-    if (debug) {
-      console.log(`[LineIndex Debug] 己方威胁线数=${playerThreats.length}, 得分=${playerScore}`);
-      console.log(`[LineIndex Debug] 对方威胁线数=${opponentThreats.length}, 扣分=${opponentScore}`);
-      console.log(`[LineIndex Debug] 2连: 己方=${playerTwoInRow}, 对方=${opponentTwoInRow}`);
-      console.log(`[LineIndex Debug] 3连: 己方=${playerThreeInRow}, 对方=${opponentThreeInRow}`);
-      console.log(`[LineIndex Debug] 总分=${score}`);
-    }
-
-    return score;
-  }
-
-  /**
-   * 找出威胁线中的空位位置（需要可立即下的位置）
-   */
-  private findEmptyPositionInLine(line: LineRecord): Position | null {
-    if (!this.getPieceAt) return null;
-
-    // 找readyEnds对应的空位（可立即下）
-    for (const pos of line.positions) {
-      if (this.getPieceAt(pos) === 'EMPTY') {
-        // 检查是否可立即下（z=0或下层有棋子）
-        if (pos.z === 0) return pos;
-        const below: Position = { x: pos.x, y: pos.y, z: pos.z - 1 };
-        if (this.getPieceAt(below) !== 'EMPTY') return pos;
-      }
-    }
-
-    // 没有readyEnds，返回任意空位
-    for (const pos of line.positions) {
-      if (this.getPieceAt(pos) === 'EMPTY') return pos;
-    }
-
-    return null;
-  }
-
-  /**
-   * 计算威胁组的得分（区分同时和非同时）
-   */
-  private calculateThreatGroupScore(threats: { lineScore: number; emptyPos: Position | null; count: number }[]): number {
-    if (threats.length === 0) return 0;
-
-    // 按空位位置分组
-    const posGroups = new Map<string, number[]>();
-    const noPosScores: number[] = [];
-
-    for (const threat of threats) {
-      if (threat.emptyPos) {
-        const key = `${threat.emptyPos.x},${threat.emptyPos.y},${threat.emptyPos.z}`;
-        if (!posGroups.has(key)) posGroups.set(key, []);
-        posGroups.get(key)!.push(threat.lineScore);
-      } else {
-        noPosScores.push(threat.lineScore);
-      }
-    }
-
-    let score = 0;
-
-    // 同时多威胁（同一空位）：正常累加
-    for (const scores of posGroups.values()) {
-      const groupSum = scores.reduce((a, b) => a + b, 0);
-      score += groupSum;
-
-      // 如果多条线共享同一空位，额外加分（双威胁价值更高）
-      if (scores.length >= 2) {
-        score += 50 * (scores.length - 1);  // 每多一条共享空位的线加50分
-      }
-    }
-
-    // 非同时多威胁（不同空位）：开根号
-    if (posGroups.size > 1 || noPosScores.length > 0) {
-      // 将所有不同空位的组得分开根号处理
-      const groupCount = posGroups.size + noPosScores.length;
-      if (groupCount > 1) {
-        // 非同时威胁的总价值 = √(各组得分之和) × √groupCount
-        // 这样可以降低多条独立威胁线的价值
-        const allGroupScores = [...Array.from(posGroups.values()).map(s => s.reduce((a, b) => a + b, 0)), ...noPosScores];
-        const rawSum = allGroupScores.reduce((a, b) => a + b, 0);
-        // 应用开根号折扣：总分 = rawSum × (1 / √groupCount)
-        score = Math.round(rawSum / Math.sqrt(groupCount));
-      }
-    }
-
-    return score;
-  }
-
-  /**
-   * 计算单条线的评分
-   * @param count 棋子数量 (1-4)
-   * @param openEnds 开放端数量 (0-2)
-   * @param readyEnds 可立即下的开放端数量 (0-2)
-   * @param isOwn 是否己方连线
-   * @returns 评分
-   */
-  private calculateLineScore(count: number, openEnds: number, readyEnds: number, isOwn: boolean): number {
-    // 两端被挡：无法延伸，价值极低
-    if (openEnds === 0) {
-      return count === 4 ? 10000 : 0;  // 只有获胜才有价值
-    }
-
-    // 基础评分（根据棋子数量）
-    const baseScores: Record<number, number> = {
-      1: 3,    // 1连：提高基础分（从1提高到3），让潜在威胁更有价值
-      2: 10,
-      3: 100,
-      4: 10000,
-    };
-    const base = baseScores[count] || 0;
-
-    // 开放端系数（己方连线用正向系数，对方威胁用放大系数）
-    // openEnds: 0=被挡, 1=一端开放, 2=两端开放
-    // readyEnds: 可立即下的开放端数量
-
-    let multiplier = 1;
-
-    if (openEnds === 2) {
-      // 两端开放：根据可立即下数量调整
-      if (readyEnds === 2) {
-        multiplier = 2.0;   // 两端都可立即下：最高价值
-      } else if (readyEnds === 1) {
-        multiplier = 1.15;  // 一端可立即下，一端需等待：中高价值（降低，避免过高评价需等待端）
-      } else {
-        multiplier = 0.4;   // 两端都需等待：较低
-      }
-    } else if (openEnds === 1) {
-      // 一端开放
-      if (readyEnds === 1) {
-        multiplier = 0.9;   // 可立即下：中等价值
-      } else {
-        multiplier = 0.3;   // 需等待：很低价值（立体向上方向的价值极低）
-      }
-    }
-
-    // 对方威胁时，系数放大（更需要关注）
-    if (!isOwn && count >= 2) {
-      multiplier *= 2;  // 对方威胁扣分放大
-    }
-
-    return Math.round(base * multiplier);
   }
 }

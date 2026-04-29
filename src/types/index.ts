@@ -122,23 +122,21 @@ export interface AIConfig {
 }
 
 /**
- * 四连记录（用于AI评估）
+ * 五连记录（用于AI评估）
  */
 export interface LineRecord {
   /** 唯一ID */
   id: number;
-  /** 4个位置坐标 */
+  /** 5个位置坐标 */
   positions: Position[];
   /** 方向向量 */
   direction: Vector3;
-  /** 黑棋数量 (0-4) */
+  /** 黑棋数量 (0-5) */
   blackCount: number;
-  /** 白棋数量 (0-4) */
+  /** 白棋数量 (0-5) */
   whiteCount: number;
-  /** 开放端数量 (0-2) - 两端可延伸的位置数 */
-  openEnds: number;
-  /** 可立即下的开放端数量 (0-2) - 开放端底层已有棋子，可立即放置 */
-  readyEnds: number;
+  /** 预计算的物理线去重键（v2: 构造时填充，避免运行时while回溯） */
+  physKey: string;
 }
 
 /**

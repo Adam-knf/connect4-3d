@@ -1,13 +1,14 @@
 /**
  * GameController 游戏流程控制
- * 协调 GameState、Board、AIPlayer、BoardRenderer、InputHandler
+ * 协调 GameState、Board、AIPlayerV2、BoardRenderer、InputHandler
  * 实现完整游戏流程
  * Phase 7 新增：PieceStateManager、AnimationController集成
  */
 
 import { GameState, StateCallback } from './GameState';
 import { Board } from './Board';
-import { AIPlayer } from './AIPlayer';
+import { AIPlayerV2 } from './ai/AIPlayerV2';
+import { PonderingEngine } from './ai/PonderingEngine';
 import { ThemeManager } from './ThemeManager';
 import { PieceStateManager } from './PieceStateManager';
 import { AnimationController } from './AnimationController';
@@ -50,7 +51,10 @@ export class GameController {
   private board: Board;
 
   /** AI玩家 */
-  private ai: AIPlayer;
+  private ai: AIPlayerV2;
+
+  /** 预判引擎（玩家回合后台预计算） */
+  private ponderingEngine: PonderingEngine | null = null;
 
   /** 主题管理器 */
   private themeManager: ThemeManager | null = null;
@@ -107,7 +111,9 @@ export class GameController {
     // 创建核心模块
     this.state = new GameState();
     this.board = new Board(this.state.getBoardHeight());
-    this.ai = new AIPlayer('MEDIUM');
+    this.ai = new AIPlayerV2('MEDIUM');
+    this.ponderingEngine = new PonderingEngine();
+    this.ponderingEngine.setAIPlayer(this.ai);
 
     // 绑定状态变化回调
     this.stateCallback = this.handleStateChange.bind(this);
@@ -250,6 +256,9 @@ export class GameController {
         // 通知回合更新
         this.notifyUIUpdate('turn', { player: this.state.getCurrentTurn(), isAI: false });
         this.notifyUIUpdate('aiThinking', false);
+        // 启动后台预判（玩家思考时后台计算 AI 响应）
+        // TODO: HARD 难度预判卡顿，暂时禁用，评估完算法效果后再开
+        // this.startPondering();
         break;
 
       case 'AI_TURN':
@@ -292,6 +301,9 @@ export class GameController {
     }
 
     console.log(`[GameController] Player click at (${x}, ${y})`);
+
+    // 停止后台预判，保留已完成的缓存
+    this.ponderingEngine?.abort();
 
     // 点击时禁用高亮
     this.boardRenderer.setHighlightEnabled(false);
@@ -373,7 +385,7 @@ export class GameController {
     const aiPiece = this.state.getAIPiece();
     this.ai.setPiece(aiPiece);
 
-    // AI决策
+    // 查预判缓存（暂时禁用，直接走 decide 路径）
     const decision = await this.ai.decide(this.board);
     console.log(`[GameController] AI decision: (${decision.x}, ${decision.y})`);
 
@@ -410,7 +422,8 @@ export class GameController {
         console.log('[GameController] Board full, draw');
         this.handleDraw();
       } else {
-        // 切换回合
+        // 清空预判缓存 + 切换回合
+        this.ponderingEngine?.clearCache();
         console.log('[GameController] No winner, switching turn...');
         this.state.switchTurn();
       }
@@ -612,6 +625,8 @@ export class GameController {
   getState(): GameStateType {
     return this.state.getState();
   }
+
+  // TODO: startPondering() 暂时禁用（HARD 难度预判卡顿），评估完算法效果后恢复
 
   /**
    * 获取状态数据

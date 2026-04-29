@@ -1,7 +1,7 @@
 /**
  * Board 棋盘状态管理
  * 三维数组存储棋盘状态，重力规则放置棋子
- * 集成四连索引（LineIndex）优化连线检测
+ * 集成五连索引（LineIndex）优化连线检测
  */
 
 import type { Player, Position, WinResult, LineRecord } from '@/types';
@@ -25,7 +25,7 @@ export class Board {
   /** 已放置的棋子数量 */
   private pieceCount: number = 0;
 
-  /** 四连索引表（优化连线检测） */
+  /** 五连索引表（优化连线检测） */
   private lineIndex: LineIndex;
 
   /**
@@ -39,11 +39,8 @@ export class Board {
     // 初始化三维数组，全部为 EMPTY
     this.grid = this.createEmptyGrid();
 
-    // 初始化四连索引表
+    // 初始化五连索引表
     this.lineIndex = new LineIndex(this.width, this.height);
-
-    // 设置棋子状态回调（用于计算开放端）
-    this.lineIndex.setGetPieceAt(this.getPiece.bind(this));
   }
 
   /**
@@ -139,7 +136,7 @@ export class Board {
     this.grid[x][y][z] = player;
     this.pieceCount++;
 
-    // 更新四连索引，检测是否获胜
+    // 更新五连索引，检测是否获胜
     const winResult = this.lineIndex.updateOnPlace(pos, player);
 
     return { pos, winResult };
@@ -172,7 +169,7 @@ export class Board {
       this.pieceCount--;
     }
 
-    // 更新四连索引
+    // 更新五连索引
     if (player !== 'EMPTY') {
       this.lineIndex.updateOnPlace(pos, player);
     } else if (oldPlayer !== 'EMPTY') {
@@ -237,10 +234,8 @@ export class Board {
       }
     }
     newBoard.pieceCount = this.pieceCount;
-    // 复制四连索引状态（clone 已经设置了 getPieceAt 回调）
+    // 复制五连索引状态
     newBoard.lineIndex = this.lineIndex.clone();
-    // 设置回调（指向新棋盘的 getPiece）
-    newBoard.lineIndex.setGetPieceAt(newBoard.getPiece.bind(newBoard));
     return newBoard;
   }
 
@@ -285,20 +280,20 @@ export class Board {
     return { x, y, z };
   }
 
-  // ==================== 四连索引相关方法 ====================
+  // ==================== 五连索引相关方法 ====================
 
   /**
-   * 获取四连索引实例
+   * 获取五连索引实例
    */
   getLineIndex(): LineIndex {
     return this.lineIndex;
   }
 
   /**
-   * 快速检测指定位置放置后是否获胜（使用四连索引）
+   * 快速检测指定位置放置后是否获胜（使用五连索引）
    * @param pos 放置位置
    * @param player 玩家类型
-   * @returns 如果放置后形成4连返回获胜结果
+   * @returns 如果放置后形成5连返回获胜结果
    */
   quickWouldWinAt(pos: Position, player: Player): WinResult | null {
     if (this.grid[pos.x][pos.y][pos.z] !== 'EMPTY') {
@@ -308,7 +303,7 @@ export class Board {
   }
 
   /**
-   * 检测当前棋盘是否有获胜连线（使用四连索引）
+   * 检测当前棋盘是否有获胜连线（使用五连索引）
    * @returns 胜负结果或null
    */
   checkWinWithIndex(): WinResult | null {
@@ -325,36 +320,26 @@ export class Board {
   }
 
   /**
-   * 获取当前局势评估分数（用于AI评估）
-   * @param player 当前玩家（AI视角）
-   * @param debug 是否输出调试信息
-   * @returns 评估分数
-   */
-  getEvaluationScore(player: Player, debug: boolean = false): number {
-    return this.lineIndex.getEvaluationScore(player, debug);
-  }
-
-  /**
-   * 获取位置涉及的4连ID列表（委托给LineIndex）
+   * 获取位置涉及的5连ID列表（委托给LineIndex）
    * @param pos 位置坐标
-   * @returns 4连ID列表
+   * @returns 5连ID列表
    */
   getLineIdsAtPosition(pos: Position): number[] {
     return this.lineIndex.getLineIdsAtPosition(pos);
   }
 
   /**
-   * 获取指定4连的完整记录（委托给LineIndex）
-   * @param lineId 4连ID
-   * @returns 4连记录或null
+   * 获取指定5连的完整记录（委托给LineIndex）
+   * @param lineId 5连ID
+   * @returns 5连记录或null
    */
   getLineRecord(lineId: number): LineRecord | null {
     return this.lineIndex.getLineRecord(lineId);
   }
 
   /**
-   * 获取所有4连记录（用于全局评估）
-   * @returns 所有4连记录数组
+   * 获取所有5连记录（用于全局评估）
+   * @returns 所有5连记录数组
    */
   getAllLineRecords(): LineRecord[] {
     return this.lineIndex.getAllLines();
