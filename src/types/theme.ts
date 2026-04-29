@@ -170,7 +170,8 @@ export interface EmissiveGlowConfig {
  */
 export interface ModelConfig {
   path: string;       // 模型路径
-  scale: number;      // 缩放比例
+  /** 缩放：number=等比，{x,y,z}=分别设（y控制高度） */
+  scale: number | { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
   // 黑白共用模型时的颜色覆盖
   colorOverride?: number;

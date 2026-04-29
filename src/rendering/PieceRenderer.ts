@@ -158,10 +158,10 @@ export class PieceRenderer implements IPieceRenderer {
       try {
         // 加载模型（黑白共用，后续改色）
         const model = await this.loader.loadModel(blackActiveModel.path);
-        this.modelCache.set(`active_black_${theme.id}`, model.clone());
+        this.modelCache.set(`active_BLACK_${theme.id}`, model.clone());
 
         // 白棋共用同一模型，只是颜色不同
-        this.modelCache.set(`active_white_${theme.id}`, model.clone());
+        this.modelCache.set(`active_WHITE_${theme.id}`, model.clone());
 
         console.log(`[PieceRenderer] Active model loaded: ${blackActiveModel.path}`);
       } catch (error) {
@@ -180,8 +180,8 @@ export class PieceRenderer implements IPieceRenderer {
     if (blackSleepModel?.path) {
       try {
         const model = await this.loader.loadModel(blackSleepModel.path);
-        this.modelCache.set(`sleep_black_${theme.id}`, model.clone());
-        this.modelCache.set(`sleep_white_${theme.id}`, model.clone());
+        this.modelCache.set(`sleep_BLACK_${theme.id}`, model.clone());
+        this.modelCache.set(`sleep_WHITE_${theme.id}`, model.clone());
 
         console.log(`[PieceRenderer] Sleep model loaded: ${blackSleepModel.path}`);
       } catch (error) {
@@ -198,6 +198,16 @@ export class PieceRenderer implements IPieceRenderer {
    */
   private encodePosition(pos: Position): string {
     return `${pos.x},${pos.y},${pos.z}`;
+  }
+
+  /**
+   * 创建棋子Mesh（仅创建，不添加到场景，不缓存）
+   * 供 BoardRenderer 在 GLB 主题时委托使用
+   * @param player 玩家类型
+   * @param state 棋子状态
+   */
+  createMesh(player: Player, state: PieceState): THREE.Object3D {
+    return this.createPieceMesh(player, state);
   }
 
   /**
@@ -294,6 +304,39 @@ export class PieceRenderer implements IPieceRenderer {
   }
 
   /**
+   * 一次遍历：材质独立化 + 收集骨骼/蒙皮信息
+   * 然后修复 SkinnedMesh 骨架引用（Group.clone 不独立克隆骨骼映射）
+   */
+  private prepareModel(model: THREE.Group): void {
+    const boneMap = new Map<string, THREE.Bone>();
+    const skinnedList: THREE.SkinnedMesh[] = [];
+
+    model.traverse((node) => {
+      if (node instanceof THREE.Bone) {
+        boneMap.set(node.name, node);
+      } else if (node instanceof THREE.Mesh) {
+        // 材质独立化（Group.clone 共享材质引用）
+        const mat = node.material;
+        if (Array.isArray(mat)) {
+          node.material = mat.map((m) => m.clone());
+        } else {
+          node.material = mat.clone();
+        }
+        if (node instanceof THREE.SkinnedMesh) {
+          skinnedList.push(node);
+        }
+      }
+    });
+
+    // 修复 SkinnedMesh 骨架：将原骨骼映射到克隆骨骼
+    for (const sm of skinnedList) {
+      const newBones = sm.skeleton.bones.map((bone) => boneMap.get(bone.name) || bone);
+      sm.skeleton = new THREE.Skeleton(newBones, sm.skeleton.boneInverses);
+      sm.bind(sm.skeleton, sm.bindMatrix);
+    }
+  }
+
+  /**
    * 创建 GLB 主题棋子Mesh
    * @param player 玩家类型
    * @param state 棋子状态
@@ -314,30 +357,45 @@ export class PieceRenderer implements IPieceRenderer {
       return this.createClassicMesh(player) as unknown as THREE.Group;
     }
 
-    // 克隆模型
-    const model = cachedModel.clone();
+    // 1. 克隆模型 + 一次遍历完成材质独立化 & 骨架修复
+    const model = cachedModel.clone() as THREE.Group;
+    this.prepareModel(model);
 
-    // 应用颜色和材质参数
+    // 2. 缩放（主题配置 model.scale，改数字即可调整大小）
     const pieceConfig = player === 'BLACK' ? this.currentTheme.pieces.black : this.currentTheme.pieces.white;
-    const color = this.loader.getPieceColor(themeId, player as 'BLACK' | 'WHITE');
-
-    this.loader.applyColorToModel(model, color, pieceConfig.material);
-
-    // 应用缩放和旋转
     const modelConfig = useSleep ? pieceConfig.sleepModel : pieceConfig.model;
-    if (modelConfig) {
-      model.scale.setScalar(modelConfig.scale);
-      if (modelConfig.rotation) {
-        model.rotation.set(
-          modelConfig.rotation.x,
-          modelConfig.rotation.y,
-          modelConfig.rotation.z
-        );
-      }
+    // 等比缩放(number) 或 非等比({x,y,z})，y 控制高度
+    const s = modelConfig?.scale;
+    if (typeof s === 'object') {
+      model.scale.set(s.x, s.y, s.z);
+    } else {
+      model.scale.setScalar(s ?? 0.15);
     }
+
+    // 3. 旋转
+    if (modelConfig?.rotation) {
+      model.rotation.set(modelConfig.rotation.x, modelConfig.rotation.y, modelConfig.rotation.z);
+    }
+
+    // 4. 改色（材质已独立，互不影响）
+    const color = this.loader.getPieceColor(themeId, player as 'BLACK' | 'WHITE');
+    this.loader.applyColorToModel(model, color, pieceConfig.material);
 
     model.castShadow = true;
     model.receiveShadow = true;
+
+    // 5. 计算垂直偏移（让模型底部落在棋盘面上）
+    model.updateWorldMatrix(true, true);
+    const bbox = new THREE.Box3();
+    model.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        if (node.geometry.boundingBox === null) node.geometry.computeBoundingBox();
+        const lb = node.geometry.boundingBox!.clone();
+        lb.applyMatrix4(node.matrixWorld);
+        bbox.union(lb);
+      }
+    });
+    model.userData.yOffset = bbox.isEmpty() ? 0 : -bbox.min.y;
 
     return model;
   }

@@ -1,11 +1,16 @@
 /**
  * 经典主题配置（苹果风格）
- * 纯净白棋+深空灰棋，毛玻璃底座，极简设计
+ * 纯净白棋+深空灰棋，棋盘贴图底座，极简设计
+ *
+ * 当前状态：
+ * - 棋盘贴图：chessboard.png（model_chessboard）
+ * - 棋子：几何体（CylinderGeometry）
+ * - 天空盒：经典主题使用渐变，无需天空盒
+ * - 毛玻璃底座样式保留基座几何体，棋盘贴图覆盖表面
  *
  * v1.2 完整修订：
  * - 棋子颜色：#f5f5f7 苹果白 / #1d1d1f 深空灰
  * - 底座颜色：#f0f0f5 毛玻璃浅灰白
- * - 毛玻璃纹理：frosted_glass.png
  * - 网格颜色：#c0c0c8 浅灰
  * - 背景：渐变上浅下深
  * - 胜利：纯白光晕增强
@@ -15,7 +20,7 @@
  *
  * 特点：
  * - 几何体棋子（CylinderGeometry）
- * - 毛玻璃底座（半透明 + 纹理贴图）
+ * - 毛玻璃底座（半透明 + 棋盘纹理贴图）
  * - 边缘光晕效果（emissiveGlow）
  * - 浅灰渐变背景
  * - 柔和均匀白光
@@ -91,8 +96,8 @@ export const CLASSIC_THEME: ThemeConfig = {
       borderRadius: 0.5,                       // 圆角设计
     },
 
-    // v1.2 新增：毛玻璃纹理贴图
-    baseTexture: '/assets/themes/classic/textures/frosted_glass.png',
+    // 棋盘模型纹理贴图（model_chessboard.png）
+    baseTexture: '/assets/themes/classic/textures/chessboard.png',
 
     // 网格样式（极简线条）
     grid: {

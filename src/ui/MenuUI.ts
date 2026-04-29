@@ -5,6 +5,7 @@
 
 import type { Difficulty, Order } from '@/types';
 import { StatsStore } from '@/core/StatsStore';
+import { UnlockManager, type UnlockState } from '@/core/UnlockManager';
 
 /**
  * 菜单回调类型
@@ -83,6 +84,15 @@ export class MenuUI {
   /** 是否显示战绩面板 */
   private showingStats: boolean = false;
 
+  /** 解锁状态 */
+  private unlocks: UnlockState = { medium: false, hard: false, theme: false };
+
+  /** 锁提示 toast */
+  private lockToast: HTMLElement | null = null;
+
+  /** 主题按钮引用 */
+  private themeButton: HTMLElement | null = null;
+
   /**
    * 构造函数
    * @param statsStore 战绩存储
@@ -99,8 +109,46 @@ export class MenuUI {
    */
   init(): void {
     this.createMenuPanel();
+    this.createCornerButtons();
     console.log('[MenuUI] Initialized');
   }
+
+  /** 右下角工具按钮：一键解锁 + 清空战绩 */
+  private createCornerButtons(): void {
+    const bar = document.createElement('div');
+    bar.className = 'corner-toolbar';
+    bar.style.cssText =
+      'position:fixed;bottom:16px;right:16px;display:flex;gap:8px;z-index:9998';
+
+    const unlockBtn = document.createElement('button');
+    unlockBtn.textContent = '一键解锁';
+    unlockBtn.className = 'corner-btn';
+    unlockBtn.onclick = () => {
+      UnlockManager.unlockAll(this.statsStore);
+      this.refreshUnlocks();
+      this.updateStatsDisplay();
+    };
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '清空战绩';
+    clearBtn.className = 'corner-btn';
+    clearBtn.onclick = () => {
+      if (confirm('确定清空全部战绩？')) {
+        UnlockManager.clearStats(this.statsStore);
+        this.refreshUnlocks();
+        this.updateStatsDisplay();
+        location.reload();
+      }
+    };
+
+    bar.appendChild(unlockBtn);
+    bar.appendChild(clearBtn);
+    this.container.appendChild(bar);
+    this.cornerBar = bar;
+  }
+
+  /** 角落工具栏引用 */
+  private cornerBar: HTMLElement | null = null;
 
   /**
    * 创建菜单面板DOM
@@ -118,6 +166,10 @@ export class MenuUI {
     const subtitle = document.createElement('div');
     subtitle.className = 'menu-subtitle';
     subtitle.textContent = '3D四子棋';
+
+     const describe = document.createElement('div');
+    describe.className = 'menu-subtitle';
+    describe.textContent = '在三维空间中将横、竖、斜等方向任意四颗己方相邻棋子连成一线即为胜利';
 
     // 难度选择区域
     const difficultySection = document.createElement('div');
@@ -171,6 +223,7 @@ export class MenuUI {
     startButton.onclick = () => this.handleStartGame();
 
     const themeButton = document.createElement('button');
+    this.themeButton = themeButton;
     themeButton.className = 'menu-btn secondary-btn';
     themeButton.textContent = '主题切换';
     themeButton.onclick = () => this.handleThemeSelect();
@@ -187,6 +240,7 @@ export class MenuUI {
     // 组合布局
     this.menuPanel.appendChild(title);
     this.menuPanel.appendChild(subtitle);
+    this.menuPanel.appendChild(describe);
     this.menuPanel.appendChild(difficultySection);
     this.menuPanel.appendChild(orderSection);
     this.menuPanel.appendChild(buttonsSection);
@@ -226,6 +280,13 @@ export class MenuUI {
     option.appendChild(nameEl);
     option.appendChild(descEl);
 
+    // 锁图标（默认隐藏，locked 时显示）
+    const lockIcon = document.createElement('span');
+    lockIcon.className = 'lock-icon';
+    lockIcon.textContent = '🔒';
+    lockIcon.style.display = 'none';
+    option.appendChild(lockIcon);
+
     return option;
   }
 
@@ -251,8 +312,58 @@ export class MenuUI {
    * 选择难度
    */
   private selectDifficulty(difficulty: Difficulty): void {
+    // 锁检查
+    if (difficulty === 'MEDIUM' && !this.unlocks.medium) {
+      this.showLockToast('在简单难度获胜后可解锁中等难度');
+      return;
+    }
+    if (difficulty === 'HARD' && !this.unlocks.hard) {
+      this.showLockToast('在中等难度获胜后可解锁困难难度');
+      return;
+    }
     this.selectedDifficulty = difficulty;
     this.updateDifficultySelection(difficulty);
+  }
+
+  /** 显示锁提示 toast */
+  private showLockToast(msg: string): void {
+    if (!this.lockToast) {
+      this.lockToast = document.createElement('div');
+      this.lockToast.className = 'lock-toast';
+      this.container.appendChild(this.lockToast);
+    }
+    this.lockToast.textContent = msg;
+    this.lockToast.classList.add('visible');
+    clearTimeout((this.lockToast as any)._timer);
+    (this.lockToast as any)._timer = setTimeout(() => {
+      this.lockToast?.classList.remove('visible');
+    }, 2000);
+  }
+
+  /** 刷新解锁状态（show 时调用） */
+  refreshUnlocks(): void {
+    this.unlocks = UnlockManager.get(this.statsStore);
+    this.difficultyOptions.forEach((el, diff) => {
+      const locked = (diff === 'MEDIUM' && !this.unlocks.medium)
+        || (diff === 'HARD' && !this.unlocks.hard);
+      if (locked) {
+        el.classList.add('locked');
+      } else {
+        el.classList.remove('locked');
+      }
+      const icon = el.querySelector('.lock-icon') as HTMLElement;
+      if (icon) icon.style.display = locked ? '' : 'none';
+    });
+    // 主题按钮锁
+    if (this.themeButton) {
+      if (this.unlocks.theme) {
+        this.themeButton.classList.remove('locked');
+        this.themeButton.textContent = '主题切换';
+      } else {
+        this.themeButton.classList.add('locked');
+        this.themeButton.textContent = '🔒 主题切换';
+      }
+    }
   }
 
   /**
@@ -293,6 +404,15 @@ export class MenuUI {
    * 处理开始游戏
    */
   private handleStartGame(): void {
+    if (this.selectedDifficulty === 'MEDIUM' && !this.unlocks.medium) {
+      this.showLockToast('在简单难度获胜后可解锁中等难度');
+      return;
+    }
+    if (this.selectedDifficulty === 'HARD' && !this.unlocks.hard) {
+      this.showLockToast('在中等难度获胜后可解锁困难难度');
+      return;
+    }
+
     console.log(`[MenuUI] Start game: difficulty=${this.selectedDifficulty}, order=${this.selectedOrder}`);
 
     if (this.onStartGame) {
@@ -419,8 +539,9 @@ export class MenuUI {
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        background: var(--bg-primary, #0a0a0f);
+        background: radial-gradient(ellipse at center, rgba(5,5,12,0.85) 30%, transparent 70%);
         z-index: 200;
+        pointer-events: none;
       }
 
       .menu-panel.hidden {
@@ -447,6 +568,11 @@ export class MenuUI {
       .menu-section {
         margin-bottom: 24px;
         text-align: center;
+        pointer-events: auto;
+        background: rgba(10, 10, 15, 0.75);
+        border-radius: 12px;
+        padding: 16px;
+        backdrop-filter: blur(8px);
       }
 
       .section-label {
@@ -481,6 +607,39 @@ export class MenuUI {
       .difficulty-option.selected {
         border-color: var(--accent-player, #3d9eff);
         background: rgba(61, 158, 255, 0.2);
+      }
+
+      .difficulty-option.locked {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: grayscale(60%);
+      }
+      .difficulty-option.locked:hover {
+        background: transparent;
+        border-color: var(--border, #2a2a3a);
+      }
+      .lock-icon {
+        font-size: 0.8rem;
+        margin-left: 4px;
+      }
+
+      .lock-toast {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 80, 80, 0.9);
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        z-index: 9999;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+      }
+      .lock-toast.visible {
+        opacity: 1;
       }
 
       .option-name {
@@ -521,6 +680,7 @@ export class MenuUI {
         display: flex;
         gap: 16px;
         margin-top: 32px;
+        pointer-events: auto;
       }
 
       .menu-btn {
@@ -553,6 +713,16 @@ export class MenuUI {
       .secondary-btn:hover {
         background: rgba(61, 158, 255, 0.1);
         border-color: var(--accent-player, #3d9eff);
+      }
+
+      .secondary-btn.locked {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: grayscale(60%);
+      }
+      .secondary-btn.locked:hover {
+        background: var(--bg-card, #1a1a28);
+        border-color: var(--border, #2a2a3a);
       }
 
       /* 战绩面板 */
@@ -648,6 +818,22 @@ export class MenuUI {
         font-size: 1rem;
         margin-top: 6px;
       }
+
+      .corner-btn {
+        background: rgba(30, 30, 50, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: rgba(255, 255, 255, 0.5);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .corner-btn:hover {
+        background: rgba(61, 158, 255, 0.15);
+        border-color: rgba(61, 158, 255, 0.4);
+        color: rgba(255, 255, 255, 0.8);
+      }
     `;
     document.head.appendChild(style);
   }
@@ -658,10 +844,12 @@ export class MenuUI {
    * 显示菜单
    */
   show(): void {
+    this.refreshUnlocks();
     if (this.menuPanel) {
       this.menuPanel.classList.remove('hidden');
       this.updateStatsDisplay();
     }
+    if (this.cornerBar) this.cornerBar.style.display = '';
   }
 
   /**
@@ -675,6 +863,7 @@ export class MenuUI {
       this.statsPanel.classList.add('hidden');
       this.showingStats = false;
     }
+    if (this.cornerBar) this.cornerBar.style.display = 'none';
   }
 
   /**
@@ -690,7 +879,10 @@ export class MenuUI {
    * 处理主题切换按钮点击
    */
   private handleThemeSelect(): void {
-    console.log('[MenuUI] Theme button clicked');
+    if (!this.unlocks.theme) {
+      this.showLockToast('在中等难度获胜后可解锁主题切换');
+      return;
+    }
     if (this.onThemeSelect) {
       this.onThemeSelect();
     }

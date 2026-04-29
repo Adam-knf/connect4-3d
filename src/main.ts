@@ -8,11 +8,13 @@ import { BoardRenderer } from '@/rendering/BoardRenderer';
 import { CameraController } from '@/rendering/CameraController';
 import { EnvironmentRenderer } from '@/rendering/EnvironmentRenderer';
 import { PieceRenderer } from '@/rendering/PieceRenderer';
+import { MenuBackground } from '@/rendering/MenuBackground';
 import { InputHandler } from '@/ui/InputHandler';
 import { GameController, type UIUpdateCallback } from '@/core/GameController';
 import { StatsStore } from '@/core/StatsStore';
 import { ThemeManager } from '@/core/ThemeManager';
 import { ThemeLoader } from '@/core/ThemeLoader';
+import { UnlockManager } from '@/core/UnlockManager';
 import { AnimationController } from '@/core/AnimationController';
 import { PieceStateManager } from '@/core/PieceStateManager';
 import { GameUI } from '@/ui/GameUI';
@@ -50,6 +52,7 @@ class ConnectFour3D {
   private environmentRenderer: EnvironmentRenderer | null = null;
   private pieceRenderer: PieceRenderer | null = null;
   private themeLoader: ThemeLoader | null = null;
+  private menuBackground: MenuBackground | null = null;
 
   /** 游戏结束回调引用（用于清理） */
   private gameEndCallback: ((result: GameResult, winner: Player | null) => void) | null = null;
@@ -118,6 +121,8 @@ class ConnectFour3D {
 
       // 创建棋子渲染器（GLB模型管理）
       this.pieceRenderer = new PieceRenderer(this.themeLoader);
+      // 关联到BoardRenderer（使GLB主题时BoardRenderer能委托创建模型棋子）
+      this.boardRenderer.setPieceRenderer(this.pieceRenderer);
 
       // 创建动画控制器
       this.animationController = new AnimationController();
@@ -133,13 +138,21 @@ class ConnectFour3D {
         this.switchTheme(themeId);
       });
 
-      // 注册环境渲染器到ThemeManager（切换时自动调用applyTheme）
+      // 注册渲染器到ThemeManager（切换时自动同步环境+棋盘）
       this.themeManager.onApplyTheme(async (theme: ThemeConfig) => {
         await this.environmentRenderer?.applyTheme(theme);
+        await this.boardRenderer?.applyTheme(theme);
       });
 
       // 集成到渲染循环
       this.sceneSetup.setAnimationController(this.animationController);
+
+      // 每帧更新中心棋子朝向镜头
+      this.sceneSetup.onBeforeRender(() => {
+        if (this.boardRenderer && this.sceneSetup) {
+          this.boardRenderer.updateCenterPiece(this.sceneSetup.getCamera());
+        }
+      });
 
       // 集成到游戏控制器
       this.gameController.setThemeManager(this.themeManager);
@@ -149,6 +162,10 @@ class ConnectFour3D {
       // 启动时加载默认主题（CLASSIC）- 应用背景/光照/棋盘颜色
       await this.themeManager.setTheme('CLASSIC');
       console.log('[Game] Default theme CLASSIC applied');
+
+      // 主菜单 3D 背景
+      this.menuBackground = new MenuBackground(this.themeLoader);
+      await this.menuBackground.init(scene);
 
       // 设置菜单回调
       this.menuUI.setStartGameCallback((difficulty, order) => {
@@ -182,8 +199,13 @@ class ConnectFour3D {
       };
       this.gameController.onUIUpdate(this.uiUpdateCallback);
 
-      // 显示主菜单
+      // 显示主菜单：素色背景 + 固定相机角度 + 隐藏棋盘
+      this.sceneSetup?.setPlainBackground(0x0a0a0f);
+      this.boardRenderer?.setBoardVisible(false);
+      this.cameraController?.setEnabled(false);
+      this.applyMenuCamera();
       this.menuUI.show();
+      this.menuBackground?.show();
 
       console.log('✅ Phase 6 UI layer initialized');
       console.log('📌 Menu displayed, select difficulty and order to start');
@@ -206,7 +228,13 @@ class ConnectFour3D {
 
     console.log(`[Game] Starting new game: difficulty=${difficulty}, order=${order}`);
 
-    // 隐藏主菜单和游戏结束面板，显示HUD
+    // 恢复主题背景，显示棋盘
+    if (this.environmentRenderer) {
+      const theme = this.themeManager?.getThemeConfig();
+      if (theme) this.environmentRenderer.applyTheme(theme);
+    }
+    this.boardRenderer?.setBoardVisible(true);
+    this.menuBackground?.hide();
     this.menuUI?.hide();
     this.gameUI?.hideGameEnd();
     this.gameUI?.show();
@@ -261,7 +289,7 @@ class ConnectFour3D {
     // 停止计时
     this.gameUI?.stopTimer();
 
-    // 更新战绩
+    // 更新战绩（解锁状态从战绩自动推导，无需单独管理）
     const difficulty = this.gameController?.getDifficulty() || 'MEDIUM';
     if (result !== 'DRAW') {
       this.statsStore?.update(difficulty, result);
@@ -342,7 +370,12 @@ class ConnectFour3D {
     this.gameUI?.hide();
 
     // 显示主菜单
+    this.sceneSetup?.setPlainBackground(0x0a0a0f);
+    this.boardRenderer?.setBoardVisible(false);
+    this.cameraController?.setEnabled(false);
+    this.applyMenuCamera();
     this.menuUI?.show();
+    this.menuBackground?.show();
   }
 
   /**
@@ -379,7 +412,10 @@ class ConnectFour3D {
    * 显示主题选择界面
    */
   showThemeSelect(): void {
-    console.log('[Game] Showing theme select...');
+    const unlocks = this.statsStore
+      ? UnlockManager.get(this.statsStore)
+      : { theme: false };
+    this.themeSelectUI?.setLocked(!unlocks.theme);
     this.themeSelectUI?.show();
   }
 
@@ -391,6 +427,18 @@ class ConnectFour3D {
     if (!this.themeManager) return;
 
     console.log(`[Game] Switching theme to: ${themeId}`);
+
+    // Step 1: 初始化 PieceRenderer（加载GLB模型），必须在BoardRenderer重建棋子之前
+    if (themeId !== 'CLASSIC' && this.pieceRenderer && this.sceneSetup) {
+      const cfg = this.themeManager.getThemeConfigById(themeId);
+      if (cfg) {
+        const scene = this.sceneSetup.getScene();
+        await this.pieceRenderer.init(scene, cfg);
+        console.log(`[Game] PieceRenderer initialized for ${themeId}`);
+      }
+    }
+
+    // Step 2: 应用主题（触发 BoardRenderer.applyTheme → recreateAllPieces 使用已加载的模型）
     const success = await this.themeManager.setTheme(themeId);
 
     if (success) {
@@ -398,20 +446,6 @@ class ConnectFour3D {
       const theme = this.themeManager.getThemeConfig();
       if (theme && this.animationController) {
         this.animationController.setTheme(theme);
-      }
-
-      // 更新棋盘渲染器
-      if (theme && this.boardRenderer) {
-        await this.boardRenderer.applyTheme(theme);
-      }
-
-      // 更新棋子渲染器（GLB主题时需要重新初始化）
-      if (theme && this.pieceRenderer && this.sceneSetup) {
-        const scene = this.sceneSetup.getScene();
-        if (theme.id !== 'CLASSIC') {
-          // 猫咪/机甲主题使用GLB模型，需要初始化PieceRenderer
-          await this.pieceRenderer.init(scene, theme);
-        }
       }
 
       console.log(`[Game] Theme switched to ${themeId}`);
@@ -425,6 +459,15 @@ class ConnectFour3D {
    */
   getTheme(): string {
     return this.themeManager?.currentTheme || 'CLASSIC';
+  }
+
+  /** 设置菜单相机角度：逆时针45° + 压低30° */
+  private applyMenuCamera(): void {
+    const cam = this.sceneSetup?.getCamera();
+    if (!cam) return;
+    // 逆时针旋转 + 压低 → 相机移到左前侧，降低高度
+    cam.position.set(3, 8, 11);
+    cam.lookAt(2.5, 4, 2.5);
   }
 
   /**
@@ -449,6 +492,7 @@ class ConnectFour3D {
     this.pieceStateManager?.reset();
     this.environmentRenderer?.dispose();
     this.pieceRenderer?.clearAll();
+    this.menuBackground?.dispose();
 
     // 清理游戏模块
     this.gameController?.dispose();

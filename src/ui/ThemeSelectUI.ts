@@ -57,6 +57,12 @@ export class ThemeSelectUI implements IThemeSelectUI {
   /** 主题选项元素映射 */
   private themeOptions: Map<ThemeId, HTMLElement> = new Map();
 
+  /** 是否锁定 */
+  private locked = false;
+
+  /** 锁提示 toast */
+  private lockToast: HTMLElement | null = null;
+
   /**
    * 构造函数
    * @param themeManager 主题管理器
@@ -219,6 +225,10 @@ export class ThemeSelectUI implements IThemeSelectUI {
    * @param themeId 选中的主题ID
    */
   private async handleThemeSelect(themeId: ThemeId): Promise<void> {
+    if (this.locked) {
+      this.showLockToast('在中等难度获胜后可解锁主题切换');
+      return;
+    }
     if (themeId === this.themeManager.currentTheme) {
       // 已是当前主题，直接关闭
       this.hide();
@@ -324,6 +334,32 @@ export class ThemeSelectUI implements IThemeSelectUI {
   /**
    * 显示主题选择面板
    */
+  /** 设置锁定状态 */
+  setLocked(locked: boolean): void {
+    this.locked = locked;
+    if (this.panel) {
+      if (locked) {
+        this.panel.classList.add('locked');
+      } else {
+        this.panel.classList.remove('locked');
+      }
+    }
+  }
+
+  private showLockToast(msg: string): void {
+    if (!this.lockToast) {
+      this.lockToast = document.createElement('div');
+      this.lockToast.className = 'lock-toast';
+      this.container.appendChild(this.lockToast);
+    }
+    this.lockToast.textContent = msg;
+    this.lockToast.classList.add('visible');
+    clearTimeout((this.lockToast as any)._timer);
+    (this.lockToast as any)._timer = setTimeout(() => {
+      this.lockToast?.classList.remove('visible');
+    }, 2000);
+  }
+
   show(): void {
     if (this.panel) {
       // 更新当前选中状态
@@ -539,6 +575,42 @@ export class ThemeSelectUI implements IThemeSelectUI {
       .confirm-ok:hover {
         background: #5aa8ff;
         box-shadow: 0 4px 12px rgba(61, 158, 255, 0.3);
+      }
+
+      /* 锁定状态遮罩 */
+      .theme-select-panel.locked::after {
+        content: '🔒 在中等难度获胜后解锁';
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #ff6666;
+        font-size: 1.1rem;
+        font-family: 'Space Mono', monospace;
+        border-radius: 12px;
+        z-index: 10;
+        pointer-events: all;
+      }
+
+      .lock-toast {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 80, 80, 0.9);
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        z-index: 9999;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+      }
+      .lock-toast.visible {
+        opacity: 1;
       }
     `;
     document.head.appendChild(style);

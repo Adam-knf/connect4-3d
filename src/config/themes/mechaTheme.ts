@@ -1,17 +1,18 @@
 /**
  * 机甲主题配置（Phase 9）
- * 机甲对战，站立/收拢姿态
+ * 机甲对战，GLB模型棋子
  *
  * 设计风格：
  * - 冷色调（金属底座 + 冰蓝网格 + 发光效果）
  * - 高金属感（metalness=0.7, roughness=0.3）
- * - 冷色天空盒科技感背景
- * - 动画：机械部件开合 + 灯光流动（代码动画）
+ * - 深色科技感渐变背景
+ * - 动画：GLB模型自带动画（运行时改色）
  *
- * 注意：
- * - 需要外部 GLB 模型素材（站立 + 收拢）
- * - 黑白共用模型，运行时改色
- * - 素材路径 placeholder，获取后更新
+ * 当前状态：
+ * - 棋盘贴图：chessboard.png（金属平台棋盘）
+ * - 棋子模型：tyrael_mecha.glb（黑白共用，运行时改色）
+ * - 天空盒：已取消，使用渐变背景
+ * - 动画：使用模型内建动画 + 代码动画混合
  */
 
 import type { ThemeConfig } from '@/types/theme';
@@ -30,16 +31,10 @@ export const MECHA_THEME: ThemeConfig = {
   pieces: {
     // 黑机甲（深蓝灰）
     black: {
-      // GLB模型配置（黑白共用站立模型，运行时改色）
+      // GLB模型配置（黑白共用模型，运行时改色）
       model: {
-        path: '/assets/themes/mecha/models/mecha_stand.glb',  // TODO: 获取素材后更新
-        scale: 0.5,
-        rotation: { x: 0, y: 0, z: 0 },
-      },
-      // 休眠姿态模型（收拢）
-      sleepModel: {
-        path: '/assets/themes/mecha/models/mecha_fold.glb',  // TODO: 获取素材后更新
-        scale: 0.5,
+        path: '/assets/mecha/tyrael_mecha.glb',
+        scale: 0.4,  // 手动调整，越小模型越小
         rotation: { x: 0, y: 0, z: 0 },
       },
       // 高金属感+光滑
@@ -51,16 +46,10 @@ export const MECHA_THEME: ThemeConfig = {
 
     // 白机甲（冷白）
     white: {
-      // 黑白共用站立模型
+      // 黑白共用模型
       model: {
-        path: '/assets/themes/mecha/models/mecha_stand.glb',  // TODO: 获取素材后更新
-        scale: 0.5,
-        rotation: { x: 0, y: 0, z: 0 },
-      },
-      // 休眠姿态模型（收拢）
-      sleepModel: {
-        path: '/assets/themes/mecha/models/mecha_fold.glb',  // TODO: 获取素材后更新
-        scale: 0.5,
+        path: '/assets/mecha/tyrael_mecha.glb',
+        scale: 0.4,  // 手动调整，越小模型越小
         rotation: { x: 0, y: 0, z: 0 },
       },
       // 高金属感+光滑
@@ -86,8 +75,8 @@ export const MECHA_THEME: ThemeConfig = {
       borderRadius: 0.1,                     // 机甲风格直角
     },
 
-    // 纹理贴图（金属）
-    baseTexture: '/assets/themes/mecha/textures/metal.png',  // TODO: 获取素材后更新
+    // 纹理贴图（金属平台棋盘）
+    baseTexture: '/assets/themes/mecha/textures/chessboard.png',
 
     // 网格样式（冰蓝色发光）
     grid: {
@@ -125,17 +114,13 @@ export const MECHA_THEME: ThemeConfig = {
 
   // ==================== 环境配置 ====================
   environment: {
-    // 冷色科技感天空盒
+    // 深色科技感渐变背景（天空盒已取消）
     background: {
-      type: 'skybox',
-      value: [
-        '/assets/themes/mecha/skybox/tech/posx.jpg',  // TODO: 获取素材后更新
-        '/assets/themes/mecha/skybox/tech/negx.jpg',
-        '/assets/themes/mecha/skybox/tech/posy.jpg',
-        '/assets/themes/mecha/skybox/tech/negy.jpg',
-        '/assets/themes/mecha/skybox/tech/posz.jpg',
-        '/assets/themes/mecha/skybox/tech/negz.jpg',
-      ],
+      type: 'gradient',
+      value: {
+        top: 0x1a1a2a,                         // #1a1a2a 深蓝黑上浅
+        bottom: 0x0a0a1a,                      // #0a0a1a 更深下深
+      },
     },
     lighting: {
       // 环境光（冷色调）
@@ -160,161 +145,120 @@ export const MECHA_THEME: ThemeConfig = {
 
   // ==================== 动画配置 ====================
   animations: {
-    // 机甲主题有呼吸动画
+    // 机甲主题有呼吸动画（各状态使用专用内建动画 + 代码效果叠加）
     hasIdleAnimation: true,
     idleAnimation: {
-      type: 'code',
-      duration: 2000,                        // 2秒循环
+      type: 'builtin',
+      builtinName: 'Armature_Stand_full',
+      duration: 2667,
       loop: true,
-      codeAnimation: {
-        scale: {
-          pattern: 'pulse',
-          intensity: 0.02,                   // ±2%机械呼吸
-        },
-        material: {
-          pattern: 'emissive_pulse',
-          color: 0x00ccff,                   // 灯光流动
-          intensity: 0.2,
-        },
-        // 机械部件开合通过模型子部件实现
-      },
     },
 
     // 悬停动画
     hover: {
-      // 己方：看向鼠标 + 微蹲准备 + 灯光加速
+      // 己方：战斗预备姿态 + 冰蓝灯光
       own: {
-        type: 'code',
-        duration: 200,
+        type: 'builtin',
+        builtinName: 'Armature_Stand Ready_full',
+        duration: 1333,
+        loop: true,
         codeAnimation: {
-          rotation: {
-            axis: 'y',
-            angle: 15,                       // 看向鼠标
-          },
-          position: {
-            pattern: 'offset',
-            intensity: 0.05,                 // 微蹲准备
-          },
-          material: {
-            pattern: 'emissive_pulse',
-            color: 0x00ccff,
-            intensity: 0.5,                  // 灯光流动加速
-          },
+          rotation: { axis: 'y', angle: 15 },
+          material: { pattern: 'emissive_pulse', color: 0x00ccff, intensity: 0.5 },
         },
       },
-      // 对方：左盾右剑半举
+      // 对方：战斗预备姿态 + 威胁抖动
       opponent: {
-        type: 'code',
-        duration: 200,
+        type: 'builtin',
+        builtinName: 'Armature_Stand Ready_full',
+        duration: 1333,
+        loop: true,
         codeAnimation: {
-          rotation: {
-            axis: 'y',
-            angle: 15,                       // 看向鼠标
-          },
-          position: {
-            pattern: 'bounce',
-            intensity: 0.1,                  // 举盾剑威胁
-          },
+          rotation: { axis: 'y', angle: 15 },
+          position: { pattern: 'bounce', intensity: 0.1 },
         },
       },
     },
 
     // 下落动画（区分己方/对方）
     fall: {
-      // 己方下落：举盾俯冲
+      // 己方下落：攻击姿态 + 弹跳
       own: {
-        type: 'code',
-        duration: 500,
+        type: 'builtin',
+        builtinName: 'Armature_Attack_full',
+        duration: 2133,
+        loop: false,
         codeAnimation: {
-          position: {
-            pattern: 'bounce',
-            intensity: 0.1,                  // 举盾俯冲
-          },
+          position: { pattern: 'bounce', intensity: 0.1 },
         },
       },
-      // 对方下落：举剑俯冲
+      // 对方下落：攻击03姿态 + 弹跳
       opponent: {
-        type: 'code',
-        duration: 500,
+        type: 'builtin',
+        builtinName: 'Armature_Attack 03_full',
+        duration: 2167,
+        loop: false,
         codeAnimation: {
-          position: {
-            pattern: 'bounce',
-            intensity: 0.1,                  // 举剑俯冲
-          },
+          position: { pattern: 'bounce', intensity: 0.1 },
         },
       },
+      // 底部为空：标准待机 + 弹跳
       default: {
-        type: 'code',
-        duration: 500,
+        type: 'builtin',
+        builtinName: 'Armature_Stand_full',
+        duration: 2667,
+        loop: true,
         codeAnimation: {
-          position: {
-            pattern: 'bounce',
-            intensity: 0.1,
-          },
+          position: { pattern: 'bounce', intensity: 0.1 },
         },
       },
     },
 
     // 对抗动画
     impact: {
-      // 己方：巨盾迎接（冰蓝盾牌光）
+      // 己方：法术 B + 冰蓝盾光震击
       own: {
-        type: 'code',
-        duration: 300,
+        type: 'builtin',
+        builtinName: 'Armature_Spell B_full',
+        duration: 867,
+        loop: false,
         codeAnimation: {
-          position: {
-            pattern: 'shake',
-            intensity: 0.05,                 // 巨盾迎接
-          },
-          material: {
-            pattern: 'emissive_pulse',
-            color: 0x00ccff,
-            intensity: 0.4,                  // 冰蓝盾牌光
-          },
+          position: { pattern: 'shake', intensity: 0.05 },
+          material: { pattern: 'emissive_pulse', color: 0x00ccff, intensity: 0.4 },
         },
       },
-      // 对方：举剑威胁（红光）
+      // 对方：法术 C + 红光威胁
       opponent: {
-        type: 'code',
-        duration: 300,
+        type: 'builtin',
+        builtinName: 'Armature_Spell C_full',
+        duration: 867,
+        loop: false,
         codeAnimation: {
-          position: {
-            pattern: 'bounce',
-            intensity: 0.08,                 // 举剑威胁
-          },
-          material: {
-            pattern: 'emissive_pulse',
-            color: 0xff3366,                 // 红光
-            intensity: 0.3,
-          },
+          position: { pattern: 'bounce', intensity: 0.08 },
+          material: { pattern: 'emissive_pulse', color: 0xff3366, intensity: 0.3 },
         },
       },
     },
 
-    // 胜利动画（双臂高举欢呼）
+    // 胜利动画（胜利欢呼）
     win: {
-      type: 'code',
-      duration: 3000,
+      type: 'builtin',
+      builtinName: 'Armature_Stand Victory_full',
+      duration: 2000,
       loop: true,
       codeAnimation: {
-        position: {
-          pattern: 'bounce',
-          intensity: 0.2,                    // 双臂高举欢呼
-        },
+        position: { pattern: 'bounce', intensity: 0.2 },
       },
     },
 
-    // 失败动画（能量熄灭：灯光归零）
+    // 失败动画（T-pose + 能量熄灭）
     lose: {
-      type: 'code',
+      type: 'builtin',
+      builtinName: 'Armature_DEFAULTS.001',
       duration: 3000,
       loop: true,
       codeAnimation: {
-        material: {
-          pattern: 'emissive_pulse',
-          color: 0xff3366,                   // 红光
-          intensity: 0.0,                    // 灯光熄灭
-        },
+        material: { pattern: 'emissive_pulse', color: 0xff3366, intensity: 0.0 },
       },
     },
   },

@@ -136,7 +136,7 @@ export class GameUI {
     // 创建容器
     this.hudPanel = document.createElement('div');
     this.hudPanel.id = 'hud-panel';
-    this.hudPanel.className = 'hud-panel';
+    this.hudPanel.className = 'hud-panel hidden';
 
     // 左侧：回合指示和返回按钮
     const leftSection = document.createElement('div');
@@ -382,6 +382,10 @@ export class GameUI {
         font-family: 'Space Mono', monospace;
         color: var(--fg-primary, #e8e8ec);
         z-index: 100;
+      }
+
+      .hud-panel.hidden {
+        display: none;
       }
 
       .hud-left, .hud-middle, .hud-right {

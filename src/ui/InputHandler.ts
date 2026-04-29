@@ -65,8 +65,8 @@ export class InputHandler {
   /** 棋盘宽度 */
   private boardWidth: number = BOARD_CONFIG.width;
 
-  /** 棋子Mesh列表（用于检测棋子遮挡） */
-  private pieceMeshes: THREE.Mesh[] = [];
+  /** 棋子Mesh列表（用于检测棋子遮挡，GLB主题时为Group） */
+  private pieceMeshes: THREE.Object3D[] = [];
 
   /** 绑定后的事件处理器引用（用于正确解绑） */
   private boundHandleClick: (event: MouseEvent) => void;
@@ -300,7 +300,7 @@ export class InputHandler {
    * 更新棋子Mesh列表（用于遮挡检测）
    * @param meshes 棋子Mesh数组
    */
-  updatePieceMeshes(meshes: THREE.Mesh[]): void {
+  updatePieceMeshes(meshes: THREE.Object3D[]): void {
     this.pieceMeshes = meshes;
   }
 

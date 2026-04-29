@@ -8,6 +8,50 @@ import * as THREE from 'three';
 import type { Position, Player } from '@/types';
 import { BOARD_CONFIG, RENDER_CONFIG, PIECE_CONFIG } from '@/config/gameConfig';
 import type { ThemeConfig } from '@/types/theme';
+import type { PieceRenderer } from '@/rendering/PieceRenderer';
+
+/**
+ * 根据棋盘位置计算棋子Y轴朝向（中心2,2除外，由 updateCenterPiece 动态处理）
+ * - x≠y 且不在对角线上：朝最近的外围边框
+ * - x==y 或 x+y==4（对角线/反对角线）：朝最近的斜角
+ */
+function getPieceOrientationY(x: number, y: number): number {
+  // 对角线与反对角线 (不含中心)
+  if (x === y || x + y === 4) {
+    const dTL = x + y;              // 到 (0,0) 距离
+    const dTR = (4 - x) + y;        // 到 (4,0)
+    const dBL = x + (4 - y);        // 到 (0,4)
+    const dBR = (4 - x) + (4 - y);  // 到 (4,4)
+    const minD = Math.min(dTL, dTR, dBL, dBR);
+    if (minD === dTL) return -Math.PI * 3 / 4; // 朝左上角
+    if (minD === dTR) return -Math.PI / 4;     // 朝右上角
+    if (minD === dBL) return Math.PI * 3 / 4;  // 朝左下角
+    return Math.PI / 4;                         // 朝右下角
+  }
+
+  // 朝最近的外围边框
+  const dL = x;
+  const dR = 4 - x;
+  const dF = y;
+  const dB = 4 - y;
+  const minB = Math.min(dL, dR, dF, dB);
+  if (minB === dL) return -Math.PI / 2;  // 朝左(-x)
+  if (minB === dR) return Math.PI / 2;   // 朝右(+x)
+  if (minB === dF) return Math.PI;              // 朝后(game -y = 3D +z)
+  return 0;                          // 朝前(game +y = 3D -z)
+}
+
+/**
+ * 用 Vite base URL 构造完整的资源路径
+ * 配置 base: '/game/connect4/' 时自动添加前缀
+ */
+function resolveAssetPath(path: string): string {
+  const base = (import.meta as any).env?.BASE_URL || '/';
+  // 去掉 base 末尾的 '/', 去掉 path 开头的 '/', 避免双斜杠
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  const normalizedPath = path.startsWith('/') ? path : '/' + path;
+  return normalizedBase + normalizedPath;
+}
 
 /**
  * 棋盘渲染器类
@@ -26,11 +70,19 @@ export class BoardRenderer {
   /** 线框组 */
   private gridLines: THREE.Group;
 
-  /** 棋子Mesh映射 (position key -> mesh) */
-  private pieces: Map<string, THREE.Mesh>;
+  /** 棋子Mesh映射 (position key -> { mesh, player }) */
+  private pieces: Map<string, { mesh: THREE.Object3D; player: Player }>;
 
-  /** 预览棋子Mesh */
-  private previewPiece: THREE.Mesh | null = null;
+  /** 预览棋子Mesh（经典主题=Mesh, GLB主题=Group） */
+  private previewPiece: THREE.Object3D | null = null;
+
+  /** GLB预览棋子缓存（避免每次悬停重新克隆模型） */
+  private glbPreviewModel: THREE.Group | null = null;
+  private glbPreviewPlayer: Player | null = null;
+
+  /** 中心(2,2)棋子引用，每帧旋转朝向镜头 */
+  /** 中心(2,2)所有层棋子，每帧旋转朝向镜头 */
+  private centerPieceMeshes = new Set<THREE.Object3D>();
 
   /** 高亮格子Mesh */
   private highlightCell: THREE.Mesh | null = null;
@@ -38,15 +90,24 @@ export class BoardRenderer {
   /** 竖直空间网格线组 */
   private verticalLines: THREE.Group | null = null;
 
+  /** 底座纹理平面（棋盘贴图） */
+  private baseTextureMesh: THREE.Mesh | null = null;
+
+  /** 纹理加载器 */
+  private textureLoader: THREE.TextureLoader = new THREE.TextureLoader();
+
   /** 是否启用高亮显示（点击时临时禁用） */
   private highlightEnabled: boolean = true;
 
-  /** 棋子材质 */
+  /** 棋子材质（经典主题用） */
   private blackPieceMaterial: THREE.MeshStandardMaterial;
   private whitePieceMaterial: THREE.MeshStandardMaterial;
 
-  /** 棋子几何体 */
+  /** 棋子几何体（经典主题用） */
   private pieceGeometry: THREE.CylinderGeometry;
+
+  /** 棋子渲染器（GLB主题用，委托创建GLB模型棋子） */
+  private pieceRenderer: PieceRenderer | null = null;
 
   // ========== Phase 7 主题化属性 ==========
 
@@ -239,32 +300,51 @@ export class BoardRenderer {
    * @param player 玩家类型
    * @returns 棋子Mesh和动画Promise
    */
-  addPiece(pos: Position, player: Player): { mesh: THREE.Mesh; animation: Promise<void> } {
+  addPiece(pos: Position, player: Player): { mesh: THREE.Object3D; animation: Promise<void> } {
     if (!this.scene) {
       throw new Error('BoardRenderer not initialized');
     }
 
     const cellSize = BOARD_CONFIG.cellSize;
     const cellHeight = BOARD_CONFIG.cellHeight;
-    const material = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
+    const startY = this.boardHeight * cellHeight + 15;
+    let mesh: THREE.Object3D;
+    let targetY: number;
 
-    // 创建棋子Mesh（CylinderGeometry 默认Y轴向上，不需要旋转）
-    const mesh = new THREE.Mesh(this.pieceGeometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
-    // 设置位置（从上方15单位开始下落）
-    // pos.x = X坐标, pos.y = Z坐标（棋盘深度）, pos.z = Y坐标（层高度）
-    const targetY = pos.z * cellHeight + PIECE_CONFIG.height / 2;
-    mesh.position.set(
-      pos.x * cellSize + cellSize / 2,              // X: 格子中心
-      this.boardHeight * cellHeight + 15,           // Y: 下落起点（上方）
-      pos.y * cellSize + cellSize / 2               // Z: 格子中心（深度）
-    );
+    if (this.useGLBPieces() && this.pieceRenderer) {
+      // GLB主题：委托PieceRenderer创建模型棋子
+      mesh = this.pieceRenderer.createMesh(player, 'IDLE');
+      // 用包围盒计算落点，使模型底部恰好接触棋盘面
+      const yOff = (mesh.userData.yOffset as number) ?? 0;
+      targetY = pos.z * cellHeight + yOff;
+      // 下落起始位置
+      mesh.position.set(
+        pos.x * cellSize + cellSize / 2,
+        startY,
+        pos.y * cellSize + cellSize / 2
+      );
+      if (pos.x === 2 && pos.y === 2) {
+        this.centerPieceMeshes.add(mesh);
+      } else {
+        mesh.rotation.y = getPieceOrientationY(pos.x, pos.y);
+      }
+    } else {
+      targetY = pos.z * cellHeight + PIECE_CONFIG.height / 2;
+      // 经典主题：使用几何体棋子
+      const material = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
+      mesh = new THREE.Mesh(this.pieceGeometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.position.set(
+        pos.x * cellSize + cellSize / 2,
+        startY,
+        pos.y * cellSize + cellSize / 2
+      );
+    }
 
     // 添加到场景和映射
     this.scene.add(mesh);
-    this.pieces.set(this.encodePosition(pos), mesh);
+    this.pieces.set(this.encodePosition(pos), { mesh, player });
 
     // 创建下落动画Promise
     const animation = this.animatePieceDrop(mesh, targetY);
@@ -278,12 +358,15 @@ export class BoardRenderer {
    * @param mesh 棋子Mesh
    * @param targetY 目标Y位置（高度）
    */
-  private animatePieceDrop(mesh: THREE.Mesh, targetY: number): Promise<void> {
+  private animatePieceDrop(mesh: THREE.Object3D, targetY: number): Promise<void> {
     return new Promise((resolve) => {
       const startY = mesh.position.y;
       const duration = PIECE_CONFIG.dropDuration;
       const decay = PIECE_CONFIG.bounceDecay;
       const bounceCount = PIECE_CONFIG.bounceCount;
+
+      // 保存基础缩放（GLB模型可能被自动缩放过，动画结束后恢复）
+      const baseScale = mesh.scale.clone();
 
       // 计算时间分配：下落 + 弹跳
       const fallDistance = startY - targetY;
@@ -345,14 +428,15 @@ export class BoardRenderer {
         }
 
         mesh.position.y = Math.max(targetY, y);
-        mesh.scale.y = scaleY;
-        mesh.scale.x = mesh.scale.z = 1 / Math.sqrt(scaleY);
+        mesh.scale.y = baseScale.y * scaleY;
+        mesh.scale.x = baseScale.x / Math.sqrt(scaleY);
+        mesh.scale.z = baseScale.z / Math.sqrt(scaleY);
 
         if (elapsed < duration) {
           requestAnimationFrame(animate);
         } else {
           mesh.position.y = targetY;
-          mesh.scale.set(1, 1, 1);
+          mesh.scale.copy(baseScale);
           resolve();
         }
       };
@@ -369,32 +453,53 @@ export class BoardRenderer {
    * @param player 当前玩家
    */
   showPreviewPiece(x: number, y: number, z: number, player: Player): void {
-    // 移除旧的预览棋子
-    this.clearPreviewPiece();
-
-    // 如果高亮被禁用，不显示预览棋子
     if (!this.highlightEnabled) return;
 
     const cellSize = BOARD_CONFIG.cellSize;
     const cellHeight = BOARD_CONFIG.cellHeight;
-    const material = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
+    const targetX = x * cellSize + cellSize / 2;
+    const targetZ = y * cellSize + cellSize / 2;
 
-    // 创建半透明预览棋子（使用主题化透明度）
-    const previewOpacity = this.themePreviewOpacity;
-    const previewMaterial = material.clone();
-    previewMaterial.transparent = true;
-    previewMaterial.opacity = previewOpacity;
+    if (this.useGLBPieces() && this.pieceRenderer) {
+      const yOff = (this.glbPreviewModel?.userData.yOffset as number) ?? 0;
+      const targetY = z * cellHeight + yOff;
+      // GLB主题：复用缓存的半透明预览模型
+      if (!this.glbPreviewModel || this.glbPreviewPlayer !== player) {
+        // 首次或玩家切换时重建预览模型
+        if (this.glbPreviewModel && this.scene) {
+          this.scene.remove(this.glbPreviewModel);
+        }
+        this.glbPreviewModel = this.pieceRenderer.createMesh(player, 'IDLE') as THREE.Group;
+        // 半透明化所有材质
+        this.glbPreviewModel.traverse((node) => {
+          if (node instanceof THREE.Mesh) {
+            const mat = node.material as THREE.Material;
+            mat.transparent = true;
+            mat.opacity = 0.4;
+            mat.depthWrite = false;
+          }
+        });
+        this.glbPreviewPlayer = player;
+        if (this.scene) this.scene.add(this.glbPreviewModel);
+      }
+      this.glbPreviewModel.visible = true;
+      this.glbPreviewModel.position.set(targetX, targetY, targetZ);
+      this.glbPreviewModel.rotation.y = getPieceOrientationY(x, y);
+      this.previewPiece = this.glbPreviewModel;
+    } else {
+      // 经典主题：几何体预览棋子
+      const targetY = z * cellHeight + PIECE_CONFIG.height / 2;
+      this.clearPreviewPiece();
+      const previewOpacity = this.themePreviewOpacity;
+      const geomMaterial = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
+      const previewMaterial = geomMaterial.clone();
+      previewMaterial.transparent = true;
+      previewMaterial.opacity = previewOpacity;
 
-    const mesh = new THREE.Mesh(this.pieceGeometry, previewMaterial);
-    mesh.position.set(
-      x * cellSize + cellSize / 2,
-      z * cellHeight + PIECE_CONFIG.height / 2,   // Y: 层高度
-      y * cellSize + cellSize / 2                // Z: 深度
-    );
-
-    this.previewPiece = mesh;
-    if (this.scene) {
-      this.scene.add(mesh);
+      const mesh = new THREE.Mesh(this.pieceGeometry, previewMaterial);
+      mesh.position.set(targetX, targetY, targetZ);
+      this.previewPiece = mesh;
+      if (this.scene) this.scene.add(mesh);
     }
   }
 
@@ -402,10 +507,17 @@ export class BoardRenderer {
    * 清除预览棋子
    */
   clearPreviewPiece(): void {
-    if (this.previewPiece && this.scene) {
+    if (this.useGLBPieces()) {
+      // GLB主题：隐藏预览模型（保留缓存）
+      if (this.glbPreviewModel) {
+        this.glbPreviewModel.visible = false;
+      }
+      this.previewPiece = null;
+    } else if (this.previewPiece && this.scene) {
+      // 经典主题：销毁几何体
       this.scene.remove(this.previewPiece);
-      this.previewPiece.geometry.dispose();
-      (this.previewPiece.material as THREE.Material).dispose();
+      (this.previewPiece as THREE.Mesh).geometry.dispose();
+      ((this.previewPiece as THREE.Mesh).material as THREE.Material).dispose();
       this.previewPiece = null;
     }
   }
@@ -648,12 +760,12 @@ export class BoardRenderer {
     console.log(`[WinHighlight] Highlighting ${positions.length} positions:`, positions);
     positions.forEach(pos => {
       const key = this.encodePosition(pos);
-      const mesh = this.pieces.get(key);
-      if (mesh) {
-        // 克隆材质以避免影响其他棋子（材质是共享的）
+      const entry = this.pieces.get(key);
+      if (entry && entry.mesh instanceof THREE.Mesh) {
+        const mesh = entry.mesh;
         const currentMaterial = mesh.material as THREE.MeshStandardMaterial;
         const clonedMaterial = currentMaterial.clone();
-        clonedMaterial.emissive = new THREE.Color(0x4ade80);  // 胜利绿色
+        clonedMaterial.emissive = new THREE.Color(0x4ade80);
         clonedMaterial.emissiveIntensity = 2;
         mesh.material = clonedMaterial;
       }
@@ -668,12 +780,12 @@ export class BoardRenderer {
     console.log(`[LoseHighlight] Highlighting ${positions.length} positions:`, positions);
     positions.forEach(pos => {
       const key = this.encodePosition(pos);
-      const mesh = this.pieces.get(key);
-      if (mesh) {
-        // 克隆材质以避免影响其他棋子（材质是共享的）
+      const entry = this.pieces.get(key);
+      if (entry && entry.mesh instanceof THREE.Mesh) {
+        const mesh = entry.mesh;
         const currentMaterial = mesh.material as THREE.MeshStandardMaterial;
         const clonedMaterial = currentMaterial.clone();
-        clonedMaterial.emissive = new THREE.Color(0xff6b4a);  // 失败红色
+        clonedMaterial.emissive = new THREE.Color(0xff6b4a);
         clonedMaterial.emissiveIntensity = 1.5;
         mesh.material = clonedMaterial;
       }
@@ -685,18 +797,22 @@ export class BoardRenderer {
    * 恢复棋子材质到原始状态
    */
   clearWinHighlight(): void {
+    if (this.useGLBPieces()) {
+      // GLB主题：win/lose特效由动画系统控制，暂无清除逻辑
+      console.log('[WinHighlight] GLB theme, skipping geometric highlight clear');
+      return;
+    }
+
     const blackMaterial = this.blackPieceMaterial;
     const whiteMaterial = this.whitePieceMaterial;
 
-    this.pieces.forEach((mesh) => {
+    this.pieces.forEach(({ mesh }) => {
+      if (!(mesh instanceof THREE.Mesh)) return;
       const currentMaterial = mesh.material as THREE.MeshStandardMaterial;
-      // 检查是否是克隆的材质（有发光效果）
       if (currentMaterial.emissiveIntensity > 0) {
-        // 从材质颜色推断棋子类型（克隆材质保留了原始颜色）
         const colorHex = currentMaterial.color.getHex();
         const isBlack = colorHex === blackMaterial.color.getHex();
         mesh.material = isBlack ? blackMaterial : whiteMaterial;
-        // 清理克隆的材质
         currentMaterial.dispose();
       }
     });
@@ -706,18 +822,70 @@ export class BoardRenderer {
   /**
    * 清除所有棋子
    */
+  /**
+   * 每帧更新中心棋子朝向（朝向用户镜头）
+   */
+  updateCenterPiece(camera: THREE.Camera): void {
+    for (const mesh of this.centerPieceMeshes) {
+      const dx = camera.position.x - mesh.position.x;
+      const dz = camera.position.z - mesh.position.z;
+      mesh.rotation.y = Math.atan2(dx, dz);
+    }
+  }
+
   clearPieces(): void {
     const scene = this.scene;
+    // 清理 GLB 预览模型
+    if (this.glbPreviewModel && scene) {
+      scene.remove(this.glbPreviewModel);
+      this.glbPreviewModel.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          const m = child.material;
+          if (Array.isArray(m)) m.forEach(x => x.dispose());
+          else m.dispose();
+        }
+      });
+      this.glbPreviewModel = null;
+      this.glbPreviewPlayer = null;
+    }
     if (scene) {
-      this.pieces.forEach(mesh => {
+      this.pieces.forEach(({ mesh }) => {
         scene.remove(mesh);
-        mesh.geometry.dispose();
-        (mesh.material as THREE.Material).dispose();
+        if (mesh instanceof THREE.Mesh) {
+          mesh.geometry.dispose();
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(m => m.dispose());
+          } else {
+            mesh.material.dispose();
+          }
+        } else {
+          // GLB Group: traverse and dispose nested meshes
+          mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry.dispose();
+              if (Array.isArray(child.material)) {
+                child.material.forEach(m => m.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          });
+        }
       });
     }
     this.pieces.clear();
+    this.centerPieceMeshes.clear();
     this.clearPreviewPiece();
     this.clearHighlight();
+  }
+
+  /** 显示/隐藏整个棋盘（菜单时隐藏，游戏时显示） */
+  setBoardVisible(visible: boolean): void {
+    this.baseGrid.visible = visible;
+    this.gridLines.visible = visible;
+    if (this.baseTextureMesh) this.baseTextureMesh.visible = visible;
+    if (this.verticalLines) this.verticalLines.visible = visible;
   }
 
   /**
@@ -745,6 +913,9 @@ export class BoardRenderer {
       });
       this.scene.remove(this.gridLines);
     }
+
+    // 清理底座纹理
+    this.removeBaseTexture();
 
     // 清理材质
     this.blackPieceMaterial.dispose();
@@ -801,14 +972,34 @@ export class BoardRenderer {
       // 添加到场景
       this.scene.add(this.baseGrid);
       this.scene.add(this.gridLines);
+
+      // 重新应用底座纹理（棋盘尺寸可能不变，但纹理平面需要重建）
+      if (this.currentTheme) {
+        this.applyBaseTexture(this.currentTheme);
+      }
     }
+  }
+
+  /**
+   * 设置棋子渲染器（GLB主题用）
+   * @param renderer PieceRenderer实例
+   */
+  setPieceRenderer(renderer: PieceRenderer): void {
+    this.pieceRenderer = renderer;
+  }
+
+  /**
+   * 当前主题是否使用GLB模型棋子
+   */
+  private useGLBPieces(): boolean {
+    return this.currentTheme !== null && this.currentTheme.id !== 'CLASSIC';
   }
 
   /**
    * 获取所有棋子Mesh列表（用于射线检测）
    */
-  getPieceMeshes(): THREE.Mesh[] {
-    return Array.from(this.pieces.values());
+  getPieceMeshes(): THREE.Object3D[] {
+    return Array.from(this.pieces.values()).map(p => p.mesh);
   }
 
   /**
@@ -848,6 +1039,9 @@ export class BoardRenderer {
 
     // 应用网格颜色
     this.applyGridLinesTheme(theme.board.grid.color, theme.board.grid.opacity);
+
+    // 加载并应用底座纹理贴图
+    this.applyBaseTexture(theme);
 
     // 应用高亮颜色
     if (theme.board.highlight) {
@@ -915,11 +1109,113 @@ export class BoardRenderer {
   }
 
   /**
+   * 加载并应用底座纹理贴图
+   * 先异步加载纹理，加载完成后再替换旧纹理（避免切换时闪烁）
+   * 自动处理非正方形纹理的裁剪，保持棋盘图案比例正确
+   * @param theme 主题配置
+   */
+  private applyBaseTexture(theme: ThemeConfig): void {
+    if (!this.scene) return;
+
+    // 无贴图 → 移除旧纹理
+    if (!theme.board.baseTexture) {
+      this.removeBaseTexture();
+      return;
+    }
+
+    const cellSize = BOARD_CONFIG.cellSize;
+    const width = BOARD_CONFIG.width;
+    const boardWorldSize = width * cellSize; // 棋盘世界尺寸（5×5）
+
+    // 先异步加载纹理，成功后再替换（避免先删后等的闪烁）
+    const resolvedPath = resolveAssetPath(theme.board.baseTexture);
+    this.textureLoader.load(
+      resolvedPath,
+      (texture) => {
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        // 根据纹理宽高比裁剪，避免正方形平面上贴图拉伸变形
+        const imgW = texture.image.width;
+        const imgH = texture.image.height;
+        const imgAspect = imgW / imgH;             // 纹理宽高比
+        const boardAspect = 1.0;                    // 棋盘平面是正方形（5×5）
+
+        if (Math.abs(imgAspect - boardAspect) > 0.01) {
+          if (imgAspect < boardAspect) {
+            // 纹理偏窄（竖长），裁剪上下，保留中间
+            const visibleRatio = imgAspect / boardAspect;
+            // 木纹贴图微调：拉宽10%，拉长5%
+            const scaleX = 1.10;
+            const scaleY = 1.05;
+            texture.repeat.set(1 / scaleX, visibleRatio / scaleY);
+            texture.offset.set((1 - 1 / scaleX) / 2, (1 - visibleRatio / scaleY) / 2);
+          } else {
+            // 纹理偏宽（横长），裁剪左右，保留中间
+            const visibleRatio = boardAspect / imgAspect;
+            texture.repeat.set(visibleRatio, 1);
+            texture.offset.set((1 - visibleRatio) / 2, 0);
+          }
+        }
+
+        const planeGeo = new THREE.PlaneGeometry(boardWorldSize, boardWorldSize);
+        planeGeo.rotateX(-Math.PI / 2); // 转为水平面（XZ平面）
+
+        const planeMat = new THREE.MeshStandardMaterial({
+          map: texture,
+          roughness: 0.5,
+          metalness: 0.0,
+          transparent: true,
+          opacity: 0.95,
+          side: THREE.DoubleSide,  // 双面渲染，相机低于水平面时贴图不消失
+        });
+
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.position.set(
+          boardWorldSize / 2,  // X: 棋盘中心
+          0.001,                // Y: 紧贴底座上方，避免 z-fighting
+          boardWorldSize / 2   // Z: 棋盘中心
+        );
+        plane.receiveShadow = true;
+        plane.frustumCulled = false;  // 关闭视锥裁剪，防止低角度时被错误剔除
+        plane.renderOrder = -1;       // 确保棋盘贴图渲染在底座之上
+        plane.name = 'boardBaseTexture';  // 调试用：可在控制台查找
+
+        // 新纹理就绪后替换旧纹理（无缝切换，无闪烁）
+        this.removeBaseTexture();
+        this.baseTextureMesh = plane;
+        this.scene!.add(plane);
+
+        // 调试日志：检查场景中是否存在
+        console.log(`[BoardRenderer] Base texture loaded: ${resolvedPath} (${imgW}x${imgH}, aspect=${imgAspect.toFixed(3)})`);
+        console.log(`[BoardRenderer] Texture plane — pos:(${plane.position.x},${plane.position.y},${plane.position.z}), visible:${plane.visible}, frustumCulled:${plane.frustumCulled}, renderOrder:${plane.renderOrder}`);
+      },
+      undefined, // onProgress
+      (error) => {
+        console.warn(`[BoardRenderer] Failed to load base texture: ${resolvedPath}`, error);
+      }
+    );
+  }
+
+  /**
+   * 移除底座纹理平面
+   */
+  private removeBaseTexture(): void {
+    if (this.baseTextureMesh && this.scene) {
+      this.scene.remove(this.baseTextureMesh);
+      this.baseTextureMesh.geometry.dispose();
+      (this.baseTextureMesh.material as THREE.Material).dispose();
+      this.baseTextureMesh = null;
+    }
+  }
+
+  /**
    * 应用棋子主题
    * @param theme 主题配置
    */
   private applyPieceTheme(theme: ThemeConfig): void {
-    // 经典主题：使用几何体棋子
+    // 经典主题：更新几何体棋子材质参数
     if (theme.pieces.black.geometry) {
       this.themeBlackPieceColor = theme.pieces.black.geometry.color;
       this.themePieceMetalness = theme.pieces.black.material?.metalness ?? 0.0;
@@ -930,7 +1226,7 @@ export class BoardRenderer {
       this.themeWhitePieceColor = theme.pieces.white.geometry.color;
     }
 
-    // 更新材质颜色和参数
+    // 更新几何体材质颜色和参数
     this.blackPieceMaterial.color.setHex(this.themeBlackPieceColor);
     this.blackPieceMaterial.metalness = this.themePieceMetalness;
     this.blackPieceMaterial.roughness = this.themePieceRoughness;
@@ -939,12 +1235,81 @@ export class BoardRenderer {
     this.whitePieceMaterial.metalness = this.themePieceMetalness;
     this.whitePieceMaterial.roughness = this.themePieceRoughness;
 
-    // 更新已存在棋子的材质（需要克隆避免共享材质影响）
-    this.pieces.forEach((mesh) => {
-      const isBlack = (mesh.material as THREE.MeshStandardMaterial).color.getHex() === RENDER_CONFIG.pieceBlack.color;
-      // 更新为新的材质
-      mesh.material = isBlack ? this.blackPieceMaterial : this.whitePieceMaterial;
+    // 如果有现有棋子，需要按新主题重新创建
+    if (this.pieces.size > 0) {
+      this.recreateAllPieces(theme);
+    }
+  }
+
+  /**
+   * 重新创建所有棋子（主题切换时调用）
+   * 收集现有棋子的位置和玩家信息，清除旧模型，按新主题创建新模型
+   */
+  private recreateAllPieces(theme: ThemeConfig): void {
+    if (!this.scene) return;
+
+    // 收集现有棋子数据（位置key + 玩家信息）
+    const entries: { key: string; player: Player }[] = [];
+    this.pieces.forEach(({ player }, key) => {
+      entries.push({ key, player });
     });
+
+    // 清除场景中的旧模型
+    entries.forEach(({ key }) => {
+      const piece = this.pieces.get(key);
+      if (piece && this.scene) {
+        this.scene.remove(piece.mesh);
+      }
+    });
+
+    // 按新主题重新创建
+    const cellSize = BOARD_CONFIG.cellSize;
+    const cellHeight = BOARD_CONFIG.cellHeight;
+
+    entries.forEach(({ key, player }) => {
+      const parts = key.split(',');
+      const pos: Position = {
+        x: parseInt(parts[0]),
+        y: parseInt(parts[1]),
+        z: parseInt(parts[2])
+      };
+
+      let mesh: THREE.Object3D;
+      let targetY: number;
+
+      if (this.useGLBPieces() && this.pieceRenderer) {
+        mesh = this.pieceRenderer.createMesh(player, 'IDLE');
+        const yOff = (mesh.userData.yOffset as number) ?? 0;
+        targetY = pos.z * cellHeight + yOff;
+      } else {
+        // 经典主题：用几何体创建
+        const material = player === 'BLACK' ? this.blackPieceMaterial : this.whitePieceMaterial;
+        mesh = new THREE.Mesh(this.pieceGeometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        targetY = pos.z * cellHeight + PIECE_CONFIG.height / 2;
+      }
+
+      mesh.position.set(
+        pos.x * cellSize + cellSize / 2,
+        targetY,
+        pos.y * cellSize + cellSize / 2
+      );
+
+      // GLB主题: 应用位置朝向
+      if (this.useGLBPieces()) {
+        if (pos.x === 2 && pos.y === 2) {
+          this.centerPieceMeshes.add(mesh);
+        } else {
+          mesh.rotation.y = getPieceOrientationY(pos.x, pos.y);
+        }
+      }
+
+      this.scene!.add(mesh);
+      this.pieces.set(key, { mesh, player });
+    });
+
+    console.log(`[BoardRenderer] Recreated ${entries.length} pieces for theme ${theme.id}`);
   }
 
   /**

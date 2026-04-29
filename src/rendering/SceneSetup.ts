@@ -20,6 +20,9 @@ export class SceneSetup {
   /** 动画控制器（Phase 7） */
   private animationController: AnimationController | null = null;
 
+  /** 每帧渲染前回调列表 */
+  private beforeRenderCallbacks: Array<() => void> = [];
+
   /** 上一次更新时间（用于计算deltaTime） */
   private lastTime: number = 0;
 
@@ -197,6 +200,11 @@ export class SceneSetup {
       this.animationController.updateAllIdle(deltaTime);
     }
 
+    // 每帧渲染前回调（如中心棋子朝向镜头）
+    for (const cb of this.beforeRenderCallbacks) {
+      cb();
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -235,6 +243,16 @@ export class SceneSetup {
   setAnimationController(controller: AnimationController): void {
     this.animationController = controller;
     console.log('[SceneSetup] AnimationController set');
+  }
+
+  /** 设置纯色背景（菜单用） */
+  setPlainBackground(color: number): void {
+    this.scene.background = new THREE.Color(color);
+  }
+
+  /** 注册每帧渲染前回调 */
+  onBeforeRender(cb: () => void): void {
+    this.beforeRenderCallbacks.push(cb);
   }
 
   /**

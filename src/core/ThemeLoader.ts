@@ -18,6 +18,17 @@ import { CAT_COLORS } from '@/config/themes/catTheme';
 import { MECHA_COLORS } from '@/config/themes/mechaTheme';
 
 /**
+ * 用 Vite base URL 构造完整的资源路径
+ * 配置 base: '/game/connect4/' 时自动添加前缀
+ */
+function resolveAssetPath(path: string): string {
+  const base = (import.meta as any).env?.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  const normalizedPath = path.startsWith('/') ? path : '/' + path;
+  return normalizedBase + normalizedPath;
+}
+
+/**
  * 素材缓存类型
  */
 type AssetCache = Map<string, THREE.Object3D | THREE.Texture | THREE.CubeTexture>;
@@ -86,11 +97,12 @@ export class ThemeLoader implements IThemeLoader {
       throw new Error(`[ThemeLoader] Loading promise for ${path} returned unexpected type`);
     }
 
-    // 开始加载
-    console.log(`[ThemeLoader] Loading model: ${path}`);
+    // 开始加载（使用 Vite base URL 解析路径）
+    const resolvedPath = resolveAssetPath(path);
+    console.log(`[ThemeLoader] Loading model: ${path} -> ${resolvedPath}`);
     const promise = new Promise<THREE.Group>((resolve, reject) => {
       this.gltfLoader.load(
-        path,
+        resolvedPath,
         (gltf) => {
           // 缓存原始模型
           this.cache.set(path, gltf.scene);
@@ -139,11 +151,12 @@ export class ThemeLoader implements IThemeLoader {
       throw new Error(`[ThemeLoader] Loading promise for ${path} returned unexpected type`);
     }
 
-    // 开始加载
-    console.log(`[ThemeLoader] Loading texture: ${path}`);
+    // 开始加载（使用 Vite base URL 解析路径）
+    const resolvedPath = resolveAssetPath(path);
+    console.log(`[ThemeLoader] Loading texture: ${path} -> ${resolvedPath}`);
     const promise = new Promise<THREE.Texture>((resolve, reject) => {
       this.textureLoader.load(
-        path,
+        resolvedPath,
         (texture) => {
           // 缓存纹理
           this.cache.set(path, texture);
@@ -189,11 +202,12 @@ export class ThemeLoader implements IThemeLoader {
       throw new Error(`[ThemeLoader] Loading promise for skybox returned unexpected type`);
     }
 
-    // 开始加载
-    console.log(`[ThemeLoader] Loading skybox: ${paths[0]}...`);
+    // 开始加载（使用 Vite base URL 解析路径）
+    const resolvedPaths = paths.map(p => resolveAssetPath(p));
+    console.log(`[ThemeLoader] Loading skybox: ${paths[0]}... -> ${resolvedPaths[0]}...`);
     const promise = new Promise<THREE.CubeTexture>((resolve, reject) => {
       this.cubeTextureLoader.load(
-        paths,
+        resolvedPaths,
         (cubeTexture) => {
           // 缓存天空盒
           this.cache.set(cacheKey, cubeTexture);
