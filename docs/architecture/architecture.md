@@ -20,7 +20,7 @@
 |------|------|------|----------|
 | 前端框架 | TypeScript | 5.x | 类型安全，提升代码质量和可维护性 |
 | 3D引擎 | Three.js | r160+ | WebGL封装完善，社区活跃，适合3D游戏开发 |
-| 3D加载器 | Three.js GLTFLoader/TextureLoader | r160+ | GLB模型加载、纹理贴图、天空盒加载（Phase 7） |
+| 3D加载器 | Three.js GLTFLoader/TextureLoader | r160+ | GLB模型加载、纹理贴图（Phase 7） |
 | 构建工具 | Vite | 5.x | 快速冷启动，HMR响应迅速，适合Web游戏开发 |
 | 状态管理 | 状态模式（自定义） | - | 游戏状态明确，使用状态机模式管理游戏流程 |
 | 数据存储 | localStorage | - | 本地战绩记录，无需后端，浏览器原生支持 |
@@ -1088,14 +1088,15 @@ ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
 ### 模块 14：ThemeLoader（素材加载）
 
 #### 1. 背景与必要性
-- **为什么需要**：统一加载 GLB 模型、纹理、天空盒，管理缓存和加载状态，提供失败 fallback
+- **为什么需要**：统一加载 GLB 模型、纹理贴图，管理缓存和加载状态，提供失败 fallback
 - **如果没有**：各模块分散加载，重复请求相同素材，没有统一的失败处理机制
+- **天空盒状态**：天空盒已取消（2026-04-28），`loadSkybox` 接口保留但当前所有主题使用 gradient 背景
 
 #### 2. 工作原理
 - **核心机制**：
   - 使用 GLTFLoader 加载 GLB 模型（猫咪/机甲主题）
-  - 使用 TextureLoader 加载纹理贴图
-  - 使用 CubeTextureLoader 加载天空盒
+  - 使用 TextureLoader 加载纹理贴图（棋盘贴图）
+  - `loadSkybox` 接口保留但暂不使用（所有主题改用渐变背景）
   - 素材缓存（Map<path, Object3D>），避免重复加载
   - 黑白共用模型，运行时通过 `traverse` 修改材质颜色
 - **数据流向**：
@@ -1109,7 +1110,7 @@ ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
 
 #### 3. 服务于整体项目
 - **位置**：Theme Layer，素材管理
-- **关系**：被 ThemeManager 调用，被 PieceRenderer 和 EnvironmentRenderer 使用
+- **关系**：被 ThemeManager 调用，被 PieceRenderer 和 BoardRenderer 使用
 - **贡献**：提供统一的素材加载和缓存服务
 
 #### 4. 技术规格
@@ -1126,7 +1127,7 @@ ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
     /** 加载纹理贴图 */
     loadTexture(path: string): Promise<THREE.Texture>;
 
-    /** 加载天空盒 */
+    /** 加载天空盒（保留接口，当前暂不使用） */
     loadSkybox(paths: string[]): Promise<THREE.CubeTexture>;
 
     /** 预加载整套主题素材 */
@@ -1377,14 +1378,16 @@ ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
 ### 模块 18：EnvironmentRenderer（环境渲染 - Phase 7 新增）
 
 #### 1. 背景与必要性
-- **为什么需要**：根据主题动态切换背景（颜色/渐变/天空盒）和光照（环境光/主光/补光）
+- **为什么需要**：根据主题动态切换背景（颜色/渐变）和光照（环境光/主光/补光）
 - **如果没有**：背景和光照固定，与主题不协调（如猫咪主题的暖光照无法呈现）
+- **天空盒状态**：skybox 类型已取消（2026-04-28），当前所有主题使用 gradient 或 color 类型
 
 #### 2. 工作原理
 - **核心机制**：
-  - 背景：支持 color（纯色）、gradient（渐变色，用 Canvas2D 生成纹理）、skybox（6面天空盒）
+  - 背景：支持 color（纯色）、gradient（渐变色，用 Canvas2D 生成纹理）
+  - `loadSkybox` 方法保留但默认走 fallback 渐变（天空盒素材暂缺）
   - 光照：管理 Three.js Scene 中的 AmbientLight、DirectionalLight（主光/补光）
-  - 切换时平滑过渡或立即切换
+  - 棋盘贴图由 BoardRenderer.applyBaseTexture() 独立渲染，不经过 EnvironmentRenderer
 - **数据流向**：
   ```
   ThemeManager.setTheme() → EnvironmentRenderer.applyTheme()
@@ -1404,7 +1407,7 @@ ThemeSelectUI → ThemeManager → ThemeLoader → 各Renderer.applyTheme()
 - **职责**：背景渲染、光照管理
 - **输入**：ThemeConfig.environment
 - **输出**：Three.js Scene 背景 + 光源更新
-- **依赖**：Three.js Scene, ThemeLoader（天空盒）, SceneSetup
+- **依赖**：Three.js Scene, SceneSetup（棋盘贴图由 BoardRenderer 独立管理）
 - **接口定义**：
   ```typescript
   interface IEnvironmentRenderer {

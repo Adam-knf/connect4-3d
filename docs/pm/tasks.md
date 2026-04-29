@@ -1,9 +1,9 @@
-# 任务拆解文档 v1.9
+# 任务拆解文档 v2.0
 
 ## 基本信息
 - **项目名称**：3D四子棋（Connect Four 3D）
 - **项目经理**：PM Agent
-- **文档版本**：v1.9
+- **文档版本**：v2.0
 - **创建日期**：2026-04-22
 - **更新日期**：2026-04-27
 - **前置依赖**：
@@ -12,6 +12,7 @@
   - visual-style-guide.md v1.0
   - theme-system-requirements.md v1.0
   - theme-system-design.md v2.0
+  - ai-evaluation-v2.md v2.0 (Phase 12 AI重构架构)
   - qa-report.md v1.0 (Phase 2 验收)
   - qa-report-phase3.md v1.0 (Phase 3 验收)
   - test-handover-phase4.md v1.0 (Phase 4 验收)
@@ -272,6 +273,42 @@ Phase 11: 验收与优化 [待开始]  ← 原Phase 9，重编号
 
 ---
 
+### Phase 12: AI评估系统重构（v2架构）
+
+> **前置依赖**：docs/architecture/ai-evaluation-v2.md v2.0（架构师设计）
+> **目标**：基于五子棋成熟AI理论，完全重构评估架构，解决v1的根本问题
+
+| ID | 任务名称 | 优先级 | 角色 | Skill | 估时 | 依赖 | 状态 | 交付物 |
+|----|----------|--------|------|-------|------|------|------|--------|
+| **基础模块（P0）** |
+| T12-1 | scores.ts分数常量：T族/G族/Cross分数定义 | P0 | dev | architect协助 | 2h | - | ✅ completed | src/core/ai/scores.ts |
+| T12-2 | PatternMatcher棋形识别：T族连续+G族间隙检测 | P0 | dev | architect协助 | 6h | T12-1 | ✅ completed | src/core/ai/PatternMatcher.ts |
+| T12-3 | ThreatEvaluator威胁评估：全盘基线+增量评估 | P0 | dev | architect协助 | 8h | T12-2 | ✅ completed | src/core/ai/ThreatEvaluator.ts |
+| **叉子检测（P1）** |
+| T12-4 | CrossDetector叉子检测：按空位聚类+类型判定 | P1 | dev | architect协助 | 4h | T12-2 | ✅ completed | src/core/ai/CrossDetector.ts |
+| **EASY模式集成（P1）** |
+| T12-5 | AIPlayerV2门面：组装引擎+失误逻辑+异步 | P1 | dev | architect协助 | 4h | T12-3, T12-4 | ✅ completed | src/core/ai/AIPlayerV2.ts |
+| T12-6 | GameController集成：替换AIPlayer为AIPlayerV2 | P1 | dev | - | 2h | T12-5 | ✅ completed | GameController.ts修改 |
+| **搜索引擎（P2）** |
+| T12-7 | SearchEngine搜索引擎：Minimax+Alpha-Beta+候选排序 | P2 | dev | architect协助 | 6h | T12-3 | ✅ completed | src/core/ai/SearchEngine.ts |
+| T12-8 | MEDIUM/HARD集成：搜索深度+难度配置 | P2 | dev | - | 2h | T12-7, T12-5 | ✅ completed | AIPlayerV2完整模式 |
+| **增强功能（P3）** |
+| T12-9 | 迭代加深+安静搜索：HARD专属增强 | P3 | dev | architect协助 | 4h | T12-7 | ✅ completed | SearchEngine增强 |
+| T12-10 | PonderingEngine预判：玩家回合后台计算 | P3 | dev | architect协助 | 6h | T12-5 | ⏳ pending | src/core/ai/PonderingEngine.ts |
+| **测试验收** |
+| T12-11 | PatternMatcher测试：单线棋形测试(T族/G族) | P1 | qa | - | 4h | T12-2 | ✅ completed | PatternMatcher.test.ts (15 tests) |
+| T12-12 | CrossDetector测试：叉子检测验证 | P1 | qa | - | 2h | T12-4 | pending | CrossDetector.test.ts |
+| T12-13 | ThreatEvaluator测试：完整局面评估测试 | P2 | qa | - | 4h | T12-3 | pending | ThreatEvaluator.test.ts |
+| T12-14 | AIPlayerV2验收：三种难度行为验证 | P0 | qa | pm确认 | 4h | T12-8 | pending | qa-report-aiplayer-v2.0.md |
+| **清理** |
+| T12-15 | 废弃旧代码：删除AIPlayer.ts评估函数 | P2 | dev | - | 2h | T12-14 | pending | 代码清理 |
+
+**里程碑 M12**：⏳ 核心模块完成（10/15），15个PatternMatcher测试通过，待PonderingEngine + 验收
+
+**Phase 12 工时总计：60h（约 7-8 个工作日）**
+
+---
+
 ## 里程碑计划
 
 | 里程碑 | 交付内容 | 验收标准 | 状态 |
@@ -287,24 +324,26 @@ Phase 11: 验收与优化 [待开始]  ← 原Phase 9，重编号
 | M9 | 机甲主题 | 全部三套主题可切换，动画流畅 | 待开始 |
 | M10 | 视觉特效 | 胜负特效、粒子效果流畅播放 | 待开始 |
 | M11 | 项目验收 | 所有验收标准通过，可发布 | 待开始 |
+| M12 | AI评估重构 | 基于v2架构，三难度行为可预测 | ⏳ 核心模块完成（10/15） |
 
 ---
 
 ## 关键路径
 
 ```
-T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 → T7-5 → T7-6 → T7-9 → T8-2 → T9-2 → T11-1
-          ↓                                                              ↓
-      T1-2 → T2-2 → T5-1                                            T7-4 → T7-9
+T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 → T7-5 → T7-6 → T7-9 → T8-2 → T9-2 → T10-2 → T11-1 → T12-2 → T12-3 → T12-14
+          ↓                                                              ↓                ↓
+      T1-2 → T2-2 → T5-1                                            T7-4 → T7-9      T12-7 → T12-8
 ```
 
 **关键任务**：
 - T2-1 Board（核心数据结构）✅
 - T2-3 WinChecker（核心判定逻辑）✅
 - T3-1 BoardRenderer（核心渲染）✅
-- T4-1 AIPlayer（核心游戏体验）✅
 - T5-1 GameController（核心流程控制）✅
-- T7-5 AnimationController（主题动画核心）✅ ← 已完成
+- T7-5 AnimationController（主题动画核心）✅
+- T12-2 PatternMatcher（AI棋形识别）← Phase 12核心
+- T12-3 ThreatEvaluator（AI威胁评估）← Phase 12核心
 
 ---
 
@@ -482,12 +521,21 @@ T1-1 → T1-4 → T2-1 → T2-3 → T3-1 → T3-2 → T4-1 → T5-1 → T7-1 →
    - 机甲素材：T9-1 获取机甲素材
    - 机甲配置：T9-2 机甲主题配置
 4. **浏览器验证**：启动游戏验证 Phase 7 主题切换流程、帧率、内存
-   - 新 Phase 10 仅专注视觉增强：连线高亮、棋盘旋转展示、粒子特效
-5. **验收凭证**：
+5. **Phase 12 AI重构说明**：
+   - 架构设计已完成：docs/architecture/ai-evaluation-v2.md v2.0
+   - 15个任务拆分完成，预计60h（7-8个工作日）
+   - 建议在 Phase 11 验收后启动，或根据项目进度灵活安排
+6. **验收凭证**：
    - Phase 1: docs/qa/qa-report.md (项目骨架)
    - Phase 2: docs/qa/qa-report.md (52个测试100%通过)
    - Phase 3: docs/qa/qa-report-phase3.md (构建+测试通过)
    - Phase 4: docs/dev/test-handover-phase4.md (70个测试通过，性能达标)
    - Phase 5: docs/qa/qa-report-phase5-v1.2.md (QA验收通过)
    - Phase 6: docs/qa/qa-report-phase6-v1.0.md (QA验收通过)
+   - Phase 7: docs/qa/qa-report-phase7-v1.0.md (代码验收通过)
    - Code Review: docs/architecture/code-review-report.md v1.1 (架构师评审通过)
+
+---
+
+**版本**：v2.0
+**最后更新**：2026-04-27（Phase 12 AI重构任务拆分 + 架构文档前置依赖）

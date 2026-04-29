@@ -70,7 +70,7 @@ v1 分层评估（AIPlayer.ts, 7个评估函数分散在 Layer0~4）存在：
 | **T3-HD** | 3 | 1(Half) | 0(Delayed) | 单端等待的3连 |
 | **T2-OR** | 2 | 2(Open) | 2(Ready) | 双端可下的2连 → 强力构建 |
 | **T2-HR** | 2 | 1(Half) | 1(Ready) | 单端可下的2连 |
-| ... | ... | ... | ... | 以此类推到 T1 级别 |
+| ... | ... | ... | ... | 以此类推到 T2 级别 |
 
 **五子棋术语仅作为理论参考**，代码中只使用上述棋形码，不使用"活三""眠三""冲四"等名称。
 
@@ -95,13 +95,17 @@ v1 分层评估（AIPlayer.ts, 7个评估函数分散在 Layer0~4）存在：
 
 威胁价值 = 基础分 × readiness 折扣。
 
-#### 差异2: 13方向 → 分类加权
+#### 差异2: 13方向 → VERTICAL 单独降权
 
-| 方向类别 | 方向 | 特点 | 完成步数 | 权重 |
-|----------|------|------|---------|------|
-| PLANE | (1,0,0), (0,1,0), (1,±1,0) | 同层，一步扩展 | 2-3步 | 1.0× |
-| SPATIAL | (±1,0,±1), (0,±1,±1), (±1,±1,±1) | 跨层 | 3-4步 | 0.6× |
-| VERTICAL | (0,0,1) | 纯叠高 | 4步 | 0.3× |
+| 方向类别 | 方向 | 权重 | 理由 |
+|----------|------|------|------|
+| HORIZONTAL | (1,0,0), (0,1,0) | 1.0× | — |
+| DIAGONAL | (1,±1,0) | 1.1× | 斜线棋子跨横竖两方向，连接度更高 |
+| VERTICAL | (0,0,1) | 0.3× | 建线全在同一列，对手一次落子可打断整条线；且极其显眼 |
+| SPATIAL | (±1,0,±1), (0,±1,±1) | 1.0× | readiness 已处理跨层成本 |
+| SPATIAL_DIAG | (±1,±1,±1) | 1.1× | 空间斜线同时跨层+跨列，连接度最高 |
+
+> 为什么 SPATIAL 不扣：跨层带来的铺垫成本已由 readiness 的 `e`(需等待) vs `E`(可立即下) 区分。T3-OR 即使跨层也说明两端已就绪，无需再打折。T3-OD 则无论什么方向都已经被打成 2000。方向权重不应与 readiness 重复计罚。
 
 #### 差异3: 列放置 → cross点必须可下
 
@@ -123,7 +127,7 @@ v1 分层评估（AIPlayer.ts, 7个评估函数分散在 Layer0~4）存在：
 | 码位 | 含义 | 取值 |
 |------|------|------|
 | **Count** | 线上己方棋子总数 | `3`(一步胜), `2`(两步胜), `1`(三步胜) |
-| **Openness** (T族) | 连续块开放端数量 | `O`(2端), `H`(1端), `C`(0端) |
+| **Openness** (T族) | 连续块开放端数量 | `O`(2端), `H`(1端), `C`(0端, 两端堵死=无价值, 见 BLK) |
 | **GapSize** (G族) | 棋子之间的空位数 | `S1`(间隔1空), `S2`(间隔2空) |
 | **Readiness** | 扩展点中可立即落子的数量 | `R`(全可下), `P`(部分可下), `D`(全需等) |
 
@@ -146,6 +150,7 @@ PatternMatcher 对连续块的每个扩展端做三步检查，汇总为 `(openE
 
   pos 在棋盘范围外?     → BLOCKED (开放端+0, 就绪端+0)
   pos 被对方棋子占据?    → BLOCKED (开放端+0, 就绪端+0)
+  pos 被己方棋子占据?    → BLOCKED (开放端+0, 就绪端+0)  // 正常不会发生: findConsecutiveBlock 已扩展到所有连续己方子
   pos 为空 AND 可立即下? → OPEN + READY (开放端+1, 就绪端+1)
   pos 为空 AND 需堆叠?   → OPEN + DELAYED (开放端+1, 就绪端+0)
 ```
@@ -158,49 +163,46 @@ PatternMatcher 对连续块的每个扩展端做三步检查，汇总为 `(openE
 - `B` = 己方棋子, `W` = 对方棋子
 - `E` = 空 + 可立即下 (Ready)
 - `e` = 空 + 需堆叠 (Delayed)
-- `_` = 堵死 (出界 / 被占)
+- `_` = 堵死 (出界 / 被占) 或 超出窗口。
+<!-- - **延伸深度 (deep)**：单开棋形 (openEnds=1) 需探开放端 ext2 有效性。deep=1(深): ext2 有效且空→能发展两步。deep=0(浅): ext2 出界/被占→填 ext1 即接近无价值。 -->
+**延伸深度（deep）**： 对于T2棋形双开棋形，需探开放端ext2有效性。 ext2 deep=2（深）有进一步扩展可能则可发展为T3-O 系列 高价值，否则deep=1 （浅）仅能发展为T3-H系列 中价值。deep=0则说明不是双开，是单开，与前提矛盾
+对于T2棋形单开棋形，也许探开放端ext2有效性。ext2 deep=2（深）可发展为T3-H 中价值，deep = 1(浅) 仅能双端堵死的三连，无发展价值。deep=0则说明不是单开，是双堵，与前提矛盾
+
 
 ```
-棋形码     5槽布局       连续块    解读
-────────────────────────────────────────────────────────────
-WIN        [B B B B _]   (0-3)    四连获胜
+棋形码       5槽布局       连续块    深度    解读
+────────────────────────────────────────────────────────────────
+WIN          [B B B B _]   (0-3)    —      四连获胜
 
-T3-OR      [E B B B E]   (1-3)    两侧E → 双开全就绪 → 绝对必胜
-T3-OP      [E B B B e]   (1-3)    左E右e (或反之) → 双开部分就绪
-T3-OD      [e B B B e]   (1-3)    两侧e → 双开全延迟
+T3-OR        [E B B B E]   (1-3)    —      两侧E → 双开全就绪
+T3-OP        [E B B B e]   (1-3)    —      左E右e → 双开部分就绪
+T3-OD        [e B B B e]   (1-3)    —      两侧e → 双开全延迟
 
-T3-HR      [B B B E _]   (0-2)    右E, 左出界 → 单开可下 (对手必堵)
-T3-HR      [E B B B _]   (1-3)    左E, 右堵死 → 单开可下
-T3-HD      [B B B e _]   (0-2)    右e, 左出界 → 单开延迟
-T3-HD      [e B B B _]   (1-3)    左e, 右堵死 → 单开延迟
+T3-HR        [E B B B _]   (1-3)    —    3000(对手必堵)
+T3-HR        [B B B E _]   (0-2)    —    3000(对手必堵)
+T3-HD        [B B B e _]   (0-2)    —      单开延迟
+T3-HD        [e B B B _]   (1-3)    —      单开延迟
 
-T2-OR      [E B B E _]   (1-2)    两侧E → 双开全就绪
-T2-OP      [E B B e _]   (1-2)    左E右e (或反之) → 双开部分就绪
-T2-OD      [e B B e _]   (1-2)    两侧e → 双开全延迟
+T2-OR        [E B B E E]   (1-2)    deep      两侧E → 双开全就绪
+T2-OP        [E B B e E]   (1-2)    deep      左E右e → 双开部分就绪
+T2-OD        [e B B e E]   (1-2)    deep      两侧e → 双开全延迟
 
-T2-HR      [B B E _ _]   (0-1)    右E, 左出界 → 单开可下
-T2-HR      [E B B _ _]   (1-2)    左E, 右堵死 → 单开可下
-T2-HD      [B B e _ _]   (0-1)    右e, 左出界 → 单开延迟
+T2-OR-SL        [E B B E _]   (1-2)    shallow      两侧E → 双开全就绪
+T2-OP-SL        [E B B e _]   (1-2)    shallow      左E右e → 双开部分就绪
+T2-OD-SL        [e B B e _]   (1-2)    shallow      两侧e → 双开全延迟
 
-T1-OR      [_ B _ _ _]   (1)      两侧E (单子居中) → 双开种子
-T1-OP      [_ B _ _ _]   (1)      一侧E一侧e → 双开部分
-T1-OD      [_ B _ _ _]   (1)      两侧e → 双开全延迟
+T2-HR        [B B E E _]  (0-1)    deep      单开深就绪 
+T2-HD        [B B e E _]  (0-1)    deep      单开深延迟 
 
-T1-HR      [B _ _ _ _]   (0)      右E, 左出界 → 单开种子
-T1-HR      [_ B _ _ _]   (1)      一侧E, 另一侧出界 → 单开种子
-T1-HD      [B _ _ _ _]   (0)      右e, 左出界 → 单开延迟
-
-BLK        [B _ _ _ _]   (0)      两侧均堵死 → 无价值
+BLK          [B _ _ _ _]   (0)       —      两端均堵 → 0
 ```
 
-**T3-OR vs T3-HR 关键区分**：
-- `[E B B B E]` → T3-OR（两侧都有空位）
-- `[B B B E _]` → T3-HR（左侧贴边/被占, 只剩右侧）
-- `[E B B B _]` → T3-HR（右侧堵死, 只剩左侧）
+**延伸深度的用途**：
+主要用在二连棋形上，因为三连棋形+双端已经涉及了5棋，有完整的筛选能力了。 双连棋形+双端才4棋，后续发展不确定。 
 
 #### 3.2.3 G族 — 间隙棋形（5槽窗口）
 
-G族 Readyness 指**间隙位置**的 E/e 状态。
+G族 Readiness 指**间隙位置**的 E/e 状态。
 
 ```
 棋形码     5槽布局       子位置    间隙    填隙结果          解读
@@ -210,10 +212,13 @@ G3-S1-R    [B E B B _]   (0,2,3)  p1=E   填E→WIN          对称
 G3-S1-R    [_ B B E B]   (1,2,4)  p3=E   填E→WIN          居中版
 G3-S1-D    [B B e B _]   (0,1,3)  p2=e   填e→WIN (需等)    延迟绝杀
 
-G2-S1-R    [B E B E _]   (0,2)    p1=E   填E→T3连续        两条路到T3威胁
-G2-S1-R    [_ B E B E]   (1,3)    p2=E   填E→T3连续        居中版
-G2-S1-R    [_ B E B _]   (1,3)    p2=E   填E→T3连续        两端对称
-G2-S1-D    [B e B e _]   (0,2)    p1=e   填e→T3连续 (需等)  延迟
+G2-S1-OR    [E B E B E]   (1,3)    p2=E   填E→T3-OR       双开就绪
+G2-S1-OD    [E B e B E]   (1,3)    p2=e   填e→T3-OR(需等)  双开延迟
+G2-S1-HR    [B E B E _]   (0,2)    p1=E   填E→T3连续       单开可下
+G2-S1-HR    [_ B E B E]   (1,3)    p2=E   填E→T3连续        居中版
+G2-S1-HD    [B e B E _]   (0,2)    p1=e   填e→T3连续(需等)  单开延迟
+G2-S1-R    [_ B E B _]   (1,3)    p2=E   填E→T3连续        无扩展端可下
+G2-S1-D    [_ B e B _]   (1,3)    p2=e   填e→T3连续(需等)  无扩展端延迟
 
 G2-S2-R    [B E E B _]   (0,3)    p1,p2=E 填任意E→G3-S1    两步到WIN
 G2-S2-D    [B e e B _]   (0,3)    p1,p2=e 填任意e→G3-S1    延迟
@@ -226,7 +231,7 @@ G2-S2-D    [B e e B _]   (0,3)    p1,p2=e 填任意e→G3-S1    延迟
 2. 延伸远端(p3) → `[B E B B _]` → **G3-S1**（再次填隙即WIN）
 两条路径都导致下一手产生T3级威胁 → 价值介于 T2-OR 和 T2-HR 之间。
 
-**为什么 G族不能归入 T族**：`[B E B E _]` 中 B 不连续，T族只能识别为两个独立 T1（总分 ~10），完全忽略填隙一路到杀的威胁。`[B B E B _]` 中虽有3子但也不连续（p0,p1,p3），T族同样看不到。
+**为什么 G族不能归入 T族**：`[B E B E _]` 中 B 不连续，T族完全忽略（无连续块→EMPTY），漏掉填隙一路到杀的威胁。`[B B E B _]` 中虽有3子但也不连续（p0,p1,p3），T族同样看不到。
 
 #### 3.2.4 棋形识别算法
 
@@ -279,7 +284,7 @@ classify(line, board, player):
 
 ```
 T族 (连续):
-  T1-OR → T2-HR → T3-HR → WIN          单侧发展
+  T2-HR → T3-HR → WIN              单侧发展
   T2-OR → T3-OP → T3-OR → WIN          双侧发展
 
 G族 (间隙):
@@ -289,7 +294,7 @@ G族 (间隙):
   G3-S1 → WIN    (填隙→获胜)
 
 跨界:
-  [B E B E] → T族见两个T1, G族见G2-S1
+  [B E B E] → T族忽略（无连续块）, G族见G2-S1
   对手漏堵G2-S1的间隙 → T3 → 下回合WIN
 
 ### 3.3 复合棋形：Cross（叉子）
@@ -342,10 +347,10 @@ G族 (间隙):
 │          复用层（现有代码）                     │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
 │  │LineIndex │ │  Board   │ │  WinChecker  │  │
-│  │预计算线   │ │clone()   │ │quickWouldWin │  │
-│  │getAllLines│ │setPiece()│ │    Fast      │  │
-│  │getPhysical│ │findDrop  │ │              │  │
-│  │ LineKey   │ │getPiece  │ │              │  │
+│  │预计算线   │ │setPiece()│ │quickWouldWin │  │
+│  │getAllLines│ │findDrop  │ │    Fast      │  │
+│  │getPhysical│ │getPiece  │ │              │  │
+│  │ LineKey   │ │getAvail  │ │              │  │
 │  └──────────┘ └──────────┘ └──────────────┘  │
 └──────────────────────────────────────────────┘
 ```
@@ -353,29 +358,36 @@ G族 (间隙):
 ### 4.2 数据流
 
 ```
-Board.clone()                          [AI开始计算]
-  │
-  ▼
-LineIndex.getAllLines()                [获取所有4连段(PatternMatcher会扩展为5槽视角)]
-  │
-  ▼
-物理线去重 → PatternMatcher.classifyLine() × N  [每条线分���棋形]
-  │
-  ▼
-ThreatEvaluator:
-  ├─ 攻击线累加 → ownScore
-  ├─ 防御线累加 → oppScore × 1.6
-  ├─ CrossDetector → crossBonus
-  ├─ 方向权重应用 (PLANE 1.0 / SPATIAL 0.6 / VERTICAL 0.3)
-  └─ 位置加分
-  │
-  ▼
-SearchEngine (MEDIUM/HARD):
-  └─ Minimax + α-β + 安静搜索
-  │
-  ▼
-{ bestPosition, bestScore }            [返回给 GameController]
-```
+ThreatEvaluator.evaluate(board, player):          [根节点：全盘基线评估，仅一次]
+  1. board.getAllLineRecords()
+  2. 物理线去重 (读 line.physKey, 构造时已预计算)
+  3. PatternMatcher.classifyBoth() × N             [一次扫双方，过滤零分]
+  4. 累加分数 + 方向权重 + CrossDetector
+  → baseline ThreatReport
+
+ThreatEvaluator.evaluateIncremental(baseline, ...): [每个候选列, ~25次]
+  → 只重算受影响的 ~50 条线 + 增量 Cross
+  → delta score
+
+Minimax (MEDIUM/HARD):
+  board.setPiece(pos, player)                      [不clone — setPiece]
+  score = minimax(board, depth-1, ...)
+  board.setPiece(pos, EMPTY)                       [undo 回溯]
+
+→ { bestPosition }                                [返回给 GameController]
+
+> **坑记录：`updateOnPlace` 早期 return 导致 undo 计数错乱**
+>
+> `board.setPiece(pos, EMPTY)` 内部调 `lineIndex.undoOnRemove(pos, player)`，它会对 `pos` 涉及的**所有**线递减计数。
+>
+> 但 `lineIndex.updateOnPlace(pos, player)` 发现某线达到4连时会**提前 return**，后续线虽已入栈但未递增计数。
+> 于是 `undoOnRemove` 对这些未递增的线也执行了递减，导致计数变为负数（0 → -1）。
+>
+> 旧版 AIPlayer 每次搜索前 `clone` 棋盘，污染只发生在副本上不影响实盘。
+> 新版直接在实盘 `setPiece/undo`，这个计数不平衡就污染了实盘的 LineIndex，造成真实落子时 4 连无法检测。
+>
+> 修复：`updateOnPlace` 不提前 return，遍历所有线后统一返回 winResult。
+> 见 `src/core/LineIndex.ts:285` 的 BUGFIX 注释。
 
 ---
 
@@ -394,23 +406,26 @@ SearchEngine (MEDIUM/HARD):
 enum PatternType {
   WIN = 'WIN',
 
-  // T族 — 连续棋形 (count + openEnds + readyEnds)
+  // T族 — 连续棋形 (count + openEnds + readyEnds + depth)
   // T3: Three consecutive, one move from winning
   T3_OR = 'T3-OR', T3_OP = 'T3-OP', T3_OD = 'T3-OD',
   T3_HR = 'T3-HR', T3_HD = 'T3-HD',
   // T2: Two consecutive, two moves from winning
-  T2_OR = 'T2-OR', T2_OP = 'T2-OP', T2_OD = 'T2-OD',
-  T2_HR = 'T2-HR', T2_HD = 'T2-HD',
-  // T1: One piece, three moves from winning
-  T1_OR = 'T1-OR', T1_OP = 'T1-OP', T1_OD = 'T1-OD',
-  T1_HR = 'T1-HR', T1_HD = 'T1-HD',
+  //   _SL (shallow): 至少一端 ext2 出界/block，发展天花板低
+  T2_OR = 'T2-OR',   T2_OR_SL = 'T2-OR-SL',
+  T2_OP = 'T2-OP',   T2_OP_SL = 'T2-OP-SL',
+  T2_OD = 'T2-OD',   T2_OD_SL = 'T2-OD-SL',
+  T2_HR = 'T2-HR',   T2_HD = 'T2-HD',
 
   // G族 — 间隙棋形 (count + gapSize + readiness)
   // G3: Three pieces with gap → fill gap = WIN
   G3_S1_R = 'G3-S1-R', G3_S1_D = 'G3-S1-D',
   // G2: Two pieces with gap → fill gap = T3
-  G2_S1_R = 'G2-S1-R', G2_S1_D = 'G2-S1-D',
-  G2_S2_R = 'G2-S2-R', G2_S2_D = 'G2-S2-D',
+  //   按 openEnds/readyEnds 细分: OR(双开全就绪) OD(双开延迟) HR(单开可下) HD(单开延迟) R/D(无扩展端)
+  G2_S1_OR = 'G2-S1-OR', G2_S1_OD = 'G2-S1-OD',
+  G2_S1_HR = 'G2-S1-HR', G2_S1_HD = 'G2-S1-HD',
+  G2_S1_R = 'G2-S1-R',   G2_S1_D = 'G2-S1-D',
+  G2_S2_R = 'G2-S2-R',   G2_S2_D = 'G2-S2-D',
 
   // Special
   BLK = 'BLK',   // Blocked
@@ -419,9 +434,11 @@ enum PatternType {
 }
 
 enum DirCategory {
-  PLANE = 'PLANE',        // z分量=0
-  VERTICAL = 'VERTICAL',  // (0,0,±1)
-  SPATIAL = 'SPATIAL',    // 其他含z分量
+  HORIZONTAL = 'HORIZONTAL',       // (1,0,0), (0,1,0) z=0 横竖
+  DIAGONAL = 'DIAGONAL',           // (1,1,0), (1,-1,0) z=0 斜
+  VERTICAL = 'VERTICAL',           // (0,0,±1)
+  SPATIAL = 'SPATIAL',             // (±1,0,±1), (0,±1,±1) 空间
+  SPATIAL_DIAG = 'SPATIAL_DIAG',   // (±1,±1,±1) 空间对角线
 }
 
 interface Pattern {
@@ -434,13 +451,14 @@ interface Pattern {
 }
 
 class PatternMatcher {
-  /** 分类一条线 */
-  classifyLine(line: LineRecord, board: Board, player: Player): Pattern;
+  /**
+   * 一次扫描同时分类双方棋形。
+   * LineRecord 已有 blackCount/whiteCount，避免重复扫描。
+   */
+  classifyBoth(line: LineRecord, board: Board, aiPlayer: Player):
+    { own: Pattern | null; opp: Pattern | null };
 
-  /** 判断线段上的棋子是否连续（无对方棋子也无空隙） */
-  isConsecutive(line: LineRecord, board: Board, player: Player): boolean;
-
-  /** 获取方向类别 */
+  /** 获取方向类别 (dir.z===0 → PLANE; dir===0,0,±1 → VERTICAL; else SPATIAL) */
   static getDirCategory(dir: Vector3): DirCategory;
 }
 ```
@@ -448,17 +466,29 @@ class PatternMatcher {
 #### 核心算法
 
 ```
-classifyLine(line, board, player):
-  1. 如果线上同时有双方棋子 → MIX
-  2. 如果线上无棋 → EMPTY
-  3. 找到己方棋子的连续块起始/结束索引
-  4. 如果 blockLen < 1 → 无连续块
-  5. 从连续块两端向外找开放端:
-     开放端 = 棋盘内 + 空位 + 非对方棋子
-  6. 对每个开放端，检查 readiness:
-     readyEnds++ if z=0 or getPiece(x,y,z-1) != EMPTY
-  7. 查 {count, openEnds, readyEnds} → PatternType
-  8. 填充 extCells (所有可扩展空位)
+classifyBoth(line, board, aiPlayer):
+  1. 利用 LineRecord 的 blackCount/whiteCount 避免重复扫描
+  2. if blackCount>0 AND whiteCount>0: own=MIX, opp=MIX
+  3. else if blackCount==0 AND whiteCount==0: own=EMP, opp=EMP
+  4. else:
+       // 连续块检测 (对双方分别做)
+       own  = classifyForPlayer(line, board, aiPlayer)
+       opp  = classifyForPlayer(line, board, opponent(aiPlayer))
+  5. return { own, opp }  // null if no valid pattern (score==0 或 EMP/BLK)
+
+classifyForPlayer(line, board, player):
+  blockStart, blockEnd = findConsecutiveBlock(positions, board, player)
+  tPattern = null
+  if blockLen >= 2:  // count >= 2 才触发 T族 (count=1 无价值)
+    openEnds = checkExtension(blockStart, -dir) + checkExtension(blockEnd, +dir)
+    tPattern = TPattern(count=blockLen, openEnds, readyEnds)
+  // 无连续块或连续块较短 → 也检查间隙（G族可能棋子更多）
+  // 例: [B B E B _] → T族见T2(2子), G族见G3-S1(3子) → 应返回G3-S1
+  gPattern = detectGapPattern(positions, board, player)
+  // 返回棋子总数更多者；棋子数相同则 T 族优先（连续更强）
+  if (!tPattern) return gPattern
+  if (!gPattern) return tPattern
+  return (gPattern.count > tPattern.count) ? gPattern : tPattern
 ```
 
 ### 5.2 CrossDetector（叉子检测器）
@@ -501,15 +531,18 @@ class CrossDetector {
 
 ```
 detect(patterns, board):
-  1. 筛选有价值 patterns (score >= 阈值，即 T2-O 及以上)
-  2. 对每条 pattern:
-       对每个 extCell:
-         如果 isPlayableAt(extCell, board):
-           clusterMap[encodePosition(extCell)].push(pattern)
-  3. 遍历 clusterMap:
-       如果同一位置有 ≥2 条 pattern:
-         创建 CrossResult { type: classify(patterns), position, patterns, score }
+  1. 筛选有价值 patterns (score >= 阈值，即 T2-OR 及以上)
+  2. 对每条 pattern, 对每个 extCell:
+       如果 isPlayableAt(extCell, board):
+         clusterMap[posKey(extCell)].push(pattern)
+  3. 遍历 clusterMap: 同一位置 ≥2 条 pattern → CrossResult
   4. 返回所有 CrossResult
+
+detectIncremental(baselineCrosses, changedExtCells, allPatterns, board):
+  1. 从 baselineCrosses 中移除涉及 changedExtCells 的旧叉子
+  2. 仅对 changedExtCells 位置重新聚类 → 新叉子
+  3. 合并 (baselineCrosses - 移除的) + 新叉子 → 返回
+  // 复杂度从 O(allPatterns × extCells) 降到 O(changedPatterns × extCells)
 ```
 
 ### 5.3 ThreatEvaluator（威胁评估器）
@@ -534,56 +567,90 @@ interface ThreatReport {
 }
 
 class ThreatEvaluator {
-  /** 完整局面评估 */
-  evaluate(board: Board, player: Player): { score: number; report: ThreatReport };
+  /** 全盘基线评估（只在根节点调用一次） */
+  evaluate(board: Board, player: Player): ThreatReport;
 
-  /** 增量评估：放置一颗棋子后的局面 */
-  evaluateAfterPlace(board: Board, pos: Position, player: Player):
-    { score: number; report: ThreatReport };
+  /**
+   * 增量评估：在已有 baseline 基础上，计算放置一颗棋子后的 delta。
+   * 只重算受该位置影响的线（~50条），不扫全量。
+   *
+   * @param baseline 当前盘面的完整评估报告
+   * @param board 棋盘
+   * @param pos 落子位置
+   * @param player 落子方
+   * @returns 放置后的新 ThreatReport（含 score）
+   */
+  evaluateIncremental(
+    baseline: ThreatReport,
+    board: Board,
+    pos: Position,
+    player: Player
+  ): ThreatReport;
 }
 ```
 
 #### 评估流程
 
+**全盘基线评估**（每层搜索只调用一次）:
+
 ```
 evaluate(board, player):
   1. allLines = board.getAllLineRecords()
-  2. 物理线去重 (LineIndex.getPhysicalLineKey):
-       同一物理线上只取棋子数最多的段
-  3. ownPatterns = [] ; oppPatterns = []
-     对每条去重后的线:
-       ownP = PatternMatcher.classifyLine(line, board, player)
-       oppP = PatternMatcher.classifyLine(line, board, opponent(player))
-       存入对应列表
-  4. 累加纯线分数:
-       ownScore = Σ ownP.score × DIR_WEIGHT[ownP.dirCategory]
-       oppScore = Σ oppP.score × DIR_WEIGHT[oppP.dirCategory]
-  5. 叉子检测:
-       ownCrosses = CrossDetector.detect(ownPatterns, board)
-       oppCrosses = CrossDetector.detect(oppPatterns, board)
-       ownScore += Σ ownCrosses.score
-       oppScore += Σ oppCrosses.score
-  6. 防守倍率:
-       finalScore = ownScore - oppScore * DEFENSE_MULTIPLIER(1.6)
-  7. 位置加分（仅对候选列评估时，加到 finalScore）
-  8. 返回 { score: finalScore, report }
+  2. 物理线去重 → 去重后的线列表 (约200-400条)
+  3. ownPatterns = []; oppPatterns = []
+     for line in dedupedLines:
+       { own, opp } = PatternMatcher.classifyBoth(line, board, player)  // 一次扫描双方
+       if own && own.score !== 0: ownPatterns.push(own)      // 过滤零分棋形
+       if opp && opp.score !== 0: oppPatterns.push(opp)
+  4. 累加 + Cross检测 + 防守倍率
+  5. 返回 ThreatReport { patterns, crosses, score }
 ```
 
-#### 物理线去重细节
+**增量评估**（每个候选列调用，~25次/层）:
 
-LineIndex 预计算的是4槽窗口（4个连续位置），同一条物理直线上会有多个重叠窗口（例如 (1,2)-(4,2) 和 (2,2)-(5,2) 是同一方向上的重叠段）。PatternMatcher 接收4槽窗口后，通过 board 查询窗口两侧的额外位置，形成5槽视角来判定棋形。去重逻辑：
+```
+evaluateIncremental(baseline, board, pos, player):
+  1. affectedLineIds = board.getLineIdsAtPosition(pos)  // 只取受影响的线，~50条
+  2. 物理线去重 (同上)
+  3. 对每条受影响线重新 classify（两侧都要: own + opp）
+  4. 从 baseline 中移除旧值，加入新值 → deltaScore
+  5. 仅对受影响的 extCells 重做 Cross 检测 → deltaCross
+  6. newScore = baseline.score + deltaScore + deltaCross + positionBonus
+  7. 返回新 ThreatReport (可复用 baseline 的大部分缓存)
+```
+
+**性能对比**:
+
+```
+旧方案 (全量 per 候选):  25候选 × 400线 = 10,000 classify/评估
+新方案 (增量):           1次全量 (400线) + 25候选 × 50线 = 1,650 classify/评估
+                        → ~6× 加速，Minimax depth=4 时差距更明显 (~46,000 vs ~7,000)
+```
+
+**Minimax 内的复用**: 搜索树中每层的 baseline 就是父节点放置后的 ThreatReport，不需要每层重新全量评估。
+
+#### 物理线去重 — 预计算键
+
+**优化**: `LineIndex.getPhysicalLineKey()` 每次沿反方向走到棋盘边界。改为在 LineIndex 构造时预计算 `LineRecord.physKey` 字段，去重时直接读。
 
 ```typescript
+// LineRecord 新增字段 (在 LineIndex.precomputeLines 时填入)
+interface LineRecord {
+  // ... 现有字段
+  physKey: string;  // 预计算的物理线去重键，避免运行时回溯
+}
+
+// 去重逻辑简化为:
 const bestSegments = new Map<string, LineRecord>();
 for (const line of allLines) {
-  const key = LineIndex.getPhysicalLineKey(line, width, height);
-  const currentMax = Math.max(line.blackCount, line.whiteCount);
-  const existing = bestSegments.get(key);
-  if (!existing || currentMax > Math.max(existing.blackCount, existing.whiteCount)) {
-    bestSegments.set(key, line);  // 保留棋子最多的段
+  const count = Math.max(line.blackCount, line.whiteCount);
+  const existing = bestSegments.get(line.physKey);
+  if (!existing || count > Math.max(existing.blackCount, existing.whiteCount)) {
+    bestSegments.set(line.physKey, line);
   }
 }
 ```
+**收益**: 每线省去 while 循环回溯（平均3-5步），400线×4=1600次坐标运算→0。
 
 ### 5.4 SearchEngine（搜索引擎）
 
@@ -647,7 +714,7 @@ quiescenceSearch(board, alpha, beta, isMaximizing):
   if isMaximizing: if standPat >= beta: return beta; alpha = max(alpha, standPat)
   else:            if standPat <= alpha: return alpha; beta = min(beta, standPat)
 
-  // 只搜索战术走法（涉及 T3-O/T3-HR 的位置）
+  // 只搜索战术走法（涉及 T3-OR/T3-HR/G3-S1 的位置）
   tacticalMoves = getTacticalMoves(board)
   for pos in tacticalMoves:
     score = quiescenceSearch(board.apply(pos), alpha, beta, !isMaximizing)
@@ -686,21 +753,185 @@ class AIPlayerV2 {
 
 ```
 calculateBestMove(board):
-  1. candidates = board.getAvailableColumns()
+  1. candidates = board.getAvailableColumns()  // 5×5=25个候选列
   2. 如果只有1个候选 → 直接返回
-  3. 按难度选择策略:
-     EASY:
-       for each candidate:
-         score = evaluateAfterPlace(board, pos, player)
+  3. // 先做一次全盘基线评估（所有难度共享）
+     baseline = evaluator.evaluate(board, player)
+  4. 按难度选择策略:
+     EASY (depth=0, 无搜索):
+       for each col in candidates:
+         report = pos = board.findDropPosition(col)
+         board.setPiece(pos, player)
+         report = evaluator.evaluateIncremental(baseline, board, pos, player)
+         board.setPiece(pos, EMPTY)  // undo
+         score = report.finalScore
        取最高分（含失误率）
      MEDIUM/HARD:
-       result = SearchEngine.search(board, player)
+       result = SearchEngine.search(board, player, baseline)
        bestPos = result.bestPos
-  4. 失误判断:
-     if shouldMakeMistake(bestScore):
-       从非最优前3名中随机选
-  5. 返回 bestPos
+  5. 失误判断 → 返回 bestPos
 ```
+
+### 5.6 PonderingEngine（预判计算）
+
+**文件**: `src/core/ai/PonderingEngine.ts`
+
+#### 背景与必要性
+
+AI 在玩家回合期间完全空闲。利用这段时间预先计算 AI 对所有可能玩家走法的响应，可以：
+- **消除 AI 响应延迟**：玩家落子后 AI 立即响应（命中缓存）
+- **提升体验**：MEDIUM/HARD 搜索耗时 1-3s，预计算可完全隐藏
+
+#### 接口
+
+```typescript
+interface PonderResult {
+  playerPos: Position;      // 玩家可能下的位置
+  aiResponse: Position;     // AI 预计算的应对
+  score: number;            // 该应对的评估分
+}
+
+class PonderingEngine {
+  private aiPlayer: AIPlayerV2;
+  private cache: Map<string, PonderResult>;
+  private abortController: AbortController | null;
+  private priorityQueue: Position[];
+
+  /** 玩家回合开始时调用，启动后台预计算 */
+  start(board: Board, playerPiece: Player): void;
+
+  /** 玩家落子后调用，优先查缓存，miss 则同步计算 */
+  lookupOrCompute(board: Board, playerPos: Position): Position;
+
+  /** 玩家提前落子时调用，取消后台计算 */
+  abort(): void;
+}
+```
+
+#### 工作流程
+
+```
+玩家回合开始:
+  1. originalBaseline = evaluator.evaluate(board, aiPiece)  // 原始局面基线（一次性）
+  2. playerCandidates = board.getAvailableColumns()         // 25列
+  3. 按优先级排序
+  4. 时间片循环 (每16ms让出主线程):
+     for pos in sorted playerCandidates:
+       if abortController.signal.aborted: break
+
+       // 增量评估玩家下pos后的局面 (只重算~50条线，不复算全量)
+       board.setPiece(pos, playerPiece)
+       playerBaseline = evaluator.evaluateIncremental(
+         originalBaseline, board, pos, playerPiece
+       )
+
+       // AI在玩家下pos后的局面上搜索（内部复用 playerBaseline，不再全量 evaluate）
+       aiMove = aiPlayer.calculateBestMoveWithBaseline(
+         board, playerBaseline
+       )
+
+       board.setPiece(pos, EMPTY)
+       cache.set(key(pos), { playerPos: pos, aiResponse: aiMove })
+       await nextTimeSlice()
+
+玩家落子:
+  1. abort() → 保留已完成缓存
+  2. if cache.has(key): return cached     // 命中
+  3. else: 同步计算（同循环内逻辑）       // 未命中
+```
+
+**数据共享链**:
+
+```
+originalBaseline (400线, 算一次)
+  │
+  ├─→ playerPos(0,0): evaluateIncremental(50线) → playerBaseline₀
+  │     └─→ AI.search(board, playerBaseline₀) → 内部25个AI候选各 evaluateIncremental(50线)
+  │
+  ├─→ playerPos(0,1): evaluateIncremental(50线) → playerBaseline₁
+  │     └─→ AI.search(...)
+  │
+  └─→ ... 共25个玩家候选
+
+每个玩家候选:
+  计算量 = 1次增量(50线) + AI search(25候选 × 50线) = ~1300 classify
+  全25个 = ~32,500 classify（对比无共享的 25 × 400 + 25 × 25 × 400 ≈ 260,000）
+```
+
+#### 中断机制
+
+```typescript
+abort(): void {
+  // 1. 设置中断标志 → 循环检测到后停止
+  this.abortController?.abort();
+  // 2. 撤销当前棋盘 (如果恰好在 setPiece 模拟中)
+  //    try/finally: board.setPiece(pos, EMPTY) 保证还原
+  // 3. 不清理 cache — 已完成的位置全部保留可用
+  //    每个位置是原子完成: 不存在"半成品"缓存
+}
+```
+
+#### 优先级策略
+
+```
+玩家候选排序:
+  10000 + 己方能立即赢 (堵)         // 这些是玩家最可能下的
+   5000 + 对方形成 T3-OR            // 必胜威胁
+   1000 + 中心区域 (距中心≤2)       // 常见位置
+      0 + 边缘区域                  // 冷门位置
+```
+
+#### 与 GameController 集成
+
+```typescript
+// GameController 中的调用点:
+onPlayerTurnStart() {
+  // 玩家回合开始 → 启动预判
+  this.ponderingEngine.start(this.board, this.playerPiece);
+}
+
+onPlayerMove(pos: Position) {
+  // 玩家落子 → 停止预判 + 查缓存
+  this.ponderingEngine.abort();
+  const aiMove = this.ponderingEngine.lookupOrCompute(this.board, pos);
+  this.executeAIMove(aiMove);
+}
+
+onAIMoveComplete() {
+  // AI落子后 → 清空旧缓存（局面已变，cache全废）
+  this.ponderingEngine.clearCache();
+  // 如果游戏未结束 → 下一轮 onPlayerTurnStart 会重新 start
+}
+```
+
+#### Cache 生命周期
+
+```
+  玩家回合开始 ──→ start() 创建新 cache
+       │
+       ▼
+  时间片循环 ──→ 逐个填 cache
+       │
+       ├── 用户提前落子: abort() → cache 保留已完成的 → 查缓存
+       │
+       └── 循环自然完成: 25个全算完
+       │
+       ▼
+  AI 落子完成 ──→ clearCache() 清空
+       │
+       ▼
+  下一轮玩家回合 ──→ start() 创建新 cache
+```
+
+`clearCache()` 的必要性：AI落子后棋盘状态变化，上一轮基于旧棋盘算出的预判结果全部作废。不清会导致命中过期数据。
+
+#### 性能特征
+
+| 场景 | 玩家思考时间 | 预计算覆盖 | AI响应 |
+|------|------------|-----------|--------|
+| 快棋 (<2s) | 短 | 部分覆盖 (3-5个候选) | 缓存命中→0ms, miss→正常 |
+| 正常 (5-15s) | 中 | 大部分覆盖 (10-15个) | 大概率命中→0ms |
+| 长考 (>30s) | 长 | 全部25个候选 | 100%命中→0ms |
 
 ---
 
@@ -721,51 +952,58 @@ calculateBestMove(board):
 棋形             基础分      说明
 ────────────────────────────────────────────
 WIN              1,000,000  立即获胜 → 最高分
-T3-OR            50,000  双开全就绪（绝对必胜）
-T3-OP             8,000  双开部分就绪
-T3-OD             2,000  双开全延迟
-T3-HR             3,000  单开可下（对手必须堵）
-T3-HD               500  单开延迟
-T2-OR               500  双开全就绪（一子成 T3-OP）
-T2-OP               150  双开部分就绪
-T2-OD                50  双开全延迟
-T2-HR                80  单开可下
-T2-HD                15  单开延迟
-T1-OR                10  双开全就绪种子
-T1-OP                 5  双开部分就绪种子
-T1-OD                 2  双开全延迟种子
-T1-HR                 3  单开可下种子
-T1-HD                 1  单开延迟种子
-G3-S1-R           3,500  间隙绝杀可下 (=T3-HR同级, 填隙→WIN)
-G3-S1-D             600  间隙绝杀延迟
-G2-S1-R             300  G2-S1可下 (填隙→T3, 或延伸→G3)
-G2-S1-D              80  间隙活二延迟
-G2-S2-R              30  间隙二可下 (填任意→G3-S1)
-G2-S2-D               8  间隙二延迟
-BLK / MIX / EMP       0  堵死/混杂/空线
+T3-OR              100,000  双开全就绪（绝对必胜）
+T3-OP                8,000  双开部分就绪
+T3-HR                7,000  单开可下 (对手必须堵)
+T3-OD                  800  双开全延迟
+T3-HD                  500  单开延迟
+T2-OR                2,000  双开全就绪-深 (ext2有效, 能到T3-OR)
+T2-OR-SL               200  双开全就绪-浅 (至少一端ext2出界/block, 仅能到T3-HR)
+T2-OP                  100  双开部分就绪-深
+T2-OP-SL                25  双开部分就绪-浅
+T2-HR                  120  单开可下-深 (ext2有效, 能到T3-HR)
+T2-OD                   20  双开全延迟-深
+T2-OD-SL                10  双开全延迟-浅
+T2-HD                    8  单开延迟
+G3-S1-R              8,000  间隙绝杀可下 (填隙→WIN)
+G2-S1-OR             7,000  G2-S1双开可下 (双端开放, 填隙→T3-OR)
+G3-S1-D                600  间隙绝杀延迟
+G2-S1-HR               300  G2-S1单开可下 (填隙→T3-HR, 或延伸→G3-S1)
+G2-S1-OD                30  G2-S1双开延迟
+G2-S1-HD                20  G2-S1单开延迟
+G2-S2-R                 30  间隙二可下 (填任意→G3-S1)
+G2-S2-D                  5  间隙二延迟
+G2-S1-R                  2  间隙活二可下 (无扩展端, 仅填隙→T3)
+G2-S1-D                  1  间隙活二延迟 (无扩展端, 填隙需等待)
+BLK / MIX / EMP          0  堵死/混杂/空线
 ```
 
 #### 对方防守分 (×1.6)
 
 ```
-T3-OR           -80,000
-T3-OP           -12,800
-T3-OD            -3,200
-T3-HR            -4,800
-T3-HD              -800
-T2-OR              -800
-T2-OP              -240
-T2-OD               -80
-T2-HR              -128
-T2-HD               -24
-T1-OR               -16
-... (T族以此类推 ×1.6)
-G3-S1-R          -5,600
-G3-S1-D            -960
-G2-S1-R            -480
-G2-S1-D            -128
-G2-S2-R             -48
-G2-S2-D             -13
+T3-OR            -160,000
+T3-OP             -12,800
+T3-HR             -11,200
+T3-OD              -1,280
+T3-HD                -800
+T2-OR              -3,200
+T2-OR-SL             -320
+T2-OP                -160
+T2-OP-SL              -40
+T2-HR                -192
+T2-OD                 -32
+T2-OD-SL              -16
+T2-HD                 -13
+G3-S1-R           -12,800
+G2-S1-OR          -11,200
+G3-S1-D              -960
+G2-S1-HR             -480
+G2-S1-OD              -48
+G2-S1-HD              -32
+G2-S2-R               -48
+G2-S2-D                -8
+G2-S1-R                -3
+G2-S1-D                -2
 ```
 
 #### 叉子加分
@@ -782,10 +1020,14 @@ CROSS-WEAK (弱)          300          -480
 #### 方向权重
 
 ```
-PLANE (同层)       1.0
-SPATIAL (空间)     0.6
-VERTICAL (垂直)    0.3
+HORIZONTAL  (1,0,0) (0,1,0)           1.0
+DIAGONAL    (1,1,0) (1,-1,0)          1.1  ← 斜线棋子跨横竖两方向，连接度更高
+VERTICAL    (0,0,1)                     0.3
+SPATIAL     (±1,0,±1) (0,±1,±1)       1.0
+SPATIAL_DIAG (±1,±1,±1)                1.1
 ```
+
+> 设计理由：PLANE 内斜线 (1,1,0) 上的棋子同时参与横竖两个方向的连线机会，连接度高于单方向横竖线，1.1 倍仅微调。SPATIAL = 1.0 理由见 §2.2 差异2。
 
 #### 位置加分
 
@@ -820,7 +1062,7 @@ finalScore =
 
 | 参数 | EASY | MEDIUM | HARD |
 |------|------|--------|------|
-| **搜索深度** | 1 (无搜索) | 2 | 4~6 (迭代加深) |
+| **搜索深度** | 0 (纯评估) | 3 | 4~6 (迭代加深) |
 | **失误率** | 25% | 10% | 0% |
 | **Alpha-Beta** | ✗ | ✓ | ✓ |
 | **候选排序** | ✗ | ✓ | ✓ |
@@ -849,12 +1091,13 @@ finalScore =
 #### MEDIUM — 有挑战
 
 ```
-策略: 浅层搜索 (depth=2)
-- Minimax alpha-beta, depth=2
-- 能看到一步后的叉子和威胁
+策略: 中等搜索 (depth=3)
+- Minimax alpha-beta, depth=3
+- 能看穿对手设陷阱 → 自己应对 → 反制 (1.5回合)
 - 10% 非关键时刻失误
 - 候选排序加速剪枝
-- 防守稳健，偶尔主动构建简单叉子
+- 防守稳健，能主动构建和识别简单叉子
+- 25³=15,625 节点 → α-β 有效 ~125 节点, ~100ms
 ```
 
 #### HARD — 高难度
@@ -930,20 +1173,40 @@ iterativeDeepening(board, player):
 
 ### 8.3 安静搜索
 
-防止**地平线效应**：在搜索边界 (depth=0) 时，如果局面存在 T3-O 威胁（对手下回合即可杀），继续深入搜索直到威胁被解决。
+防止**地平线效应**：在搜索边界 (depth=0) 时，如果局面存在 T3-OR 威胁（对手下回合即可杀），继续深入搜索直到威胁被解决。
 
 ```
-quiescenceSearch(board, alpha, beta, isMaximizing):
-  standPat = evaluator.evaluate(board, player).score
-  // stand-pat 剪枝
-  ...
-  // 生成战术走法: 只考虑能形成/破坏 T3-O 的位置
+quiescenceSearch(board, alpha, beta, isMaximizing, aiPiece):
+  // aiPiece: AI 的棋子颜色，用于评估视角
+  currentPlayer = isMaximizing ? aiPiece : opponent(aiPiece)
+
+  // 0. 先扫立即获胜（避免 horizon 效应让评估分低估必胜局面）
+  for pos in board.getAvailableColumns():
+    if WinChecker.quickWouldWinFast(board, pos, currentPlayer):
+      return isMaximizing ? WIN_SCORE : -WIN_SCORE
+
+  // 1. stand-pat（始终从 AI 视角评估）
+  standPat = evaluator.evaluate(board, aiPiece).score
+  if isMaximizing:
+    if standPat >= beta: return beta
+    alpha = max(alpha, standPat)
+  else:
+    if standPat <= alpha: return alpha
+    beta = min(beta, standPat)
+
+  // 2. 生成战术走法: 只考虑能形成/破坏 T3-OR/T3-HR/G3-S1 的位置
   tacticalMoves = findTacticalMoves(board)
   if tacticalMoves.length == 0: return standPat
 
+  // 3. 递归搜索战术走法
   for pos in tacticalMoves:
-    score = quiescenceSearch(board.apply(pos), alpha, beta, !isMaximizing)
-    ...
+    board.setPiece(pos, currentPlayer)
+    score = quiescenceSearch(board, alpha, beta, !isMaximizing)
+    board.setPiece(pos, EMPTY)
+    if isMaximizing: alpha = max(alpha, score)
+    else:            beta = min(beta, score)
+    if beta <= alpha: break
+
   return isMaximizing ? alpha : beta
 ```
 
@@ -979,7 +1242,7 @@ expect: PatternType=WIN
 5槽 [E B B B E] (块1-3), 左右均 E(可下)
 layout: B(1,2,0), B(2,2,0), B(3,2,0)
   extCells: (0,2,0) z=0→READY, (4,2,0) z=0→READY
-expect: PatternType=T3-OR, score=50000
+expect: PatternType=T3-OR, score=100000
 ```
 
 #### TC-03: T3-OP — 双开部分就绪
@@ -1005,7 +1268,7 @@ expect: PatternType=T3-OD, score=2000
 ```
 5槽 [B B B E _] (块0-2), _ 左出界, 右 E(可下)
 layout: B(0,2,0), B(1,2,0), B(2,2,0)
-expect: PatternType=T3-HR, score=3000
+expect: PatternType=T3-HR, score=7000
 ```
 
 #### TC-06: T3-HD — 单开延迟（贴边+高层）
@@ -1022,7 +1285,7 @@ expect: PatternType=T3-HD, score=500
 ```
 5槽 [E B B E _] (块1-2), 左右均 E(可下)
 layout: B(1,2,0), B(2,2,0)
-expect: PatternType=T2-OR, score=500
+expect: PatternType=T2-OR-SL, score=200  // 贴边 ext2 出界→shallow
 ```
 
 #### TC-08: T2-HR — 单开可下（贴边）
@@ -1030,7 +1293,7 @@ expect: PatternType=T2-OR, score=500
 ```
 5槽 [B B E _ _] (块0-1), _ 左出界, 右 E(可下)
 layout: B(0,2,0), B(1,2,0)
-expect: PatternType=T2-HR, score=80
+expect: PatternType=T2-HR, score=120
 ```
 
 #### TC-09: MIX — 双方棋子混杂
@@ -1044,26 +1307,20 @@ expect: PatternType=MIX, score=0
 #### TC-10: 非连续 → G族捕获
 
 ```
-5槽 [B E B e _] 二子不连续, T族只能见两个T1(~10分)
+5槽 [B E B e _] 二子不连续, T族无法识别
 layout: B(0,2,0), B(2,2,1)
-T族结果: isConsecutive=false → 两个独立 T1-HR, 总分 ~6
-G族结果: G2-S1-R (填隙→T3连续!), 分数 ~300
+T族结果: isConsecutive=false → EMP (无连续块), 总分 0
+G族结果: G2-S1 (填隙→T3连续!), 分数 ~300
 ```
 
-#### TC-11: T1-OR — 双开种子
-
-```
-5槽 [_ B _ _ _] (单子居中), 左右均 E(可下)
-layout: B(2,2,0)
-expect: PatternType=T1-OR, score=10
-```
+> **注**：TC-11 已移除（T1 族棋形废弃，单子棋形无评估价值）。
 
 #### TC-12: G3-S1-R — 间隙绝杀可下
 
 ```
 5槽 [B B E B _] (子0,1,3), 间隙p2 z=0可下 → 填隙即WIN
 layout: B(0,2,0), B(1,2,0), B(3,2,0)
-expect: PatternType=G3-S1-R, score=3500 (=T3-HR同级)
+expect: PatternType=G3-S1-R, score=8000
 ```
 
 #### TC-13: G2-S1-R — G2-S1可下
@@ -1071,7 +1328,7 @@ expect: PatternType=G3-S1-R, score=3500 (=T3-HR同级)
 ```
 5槽 [B E B E _] (子0,2), 间隙p1 z=0可下 → 填隙→T3连续
 layout: B(0,2,0), B(2,2,0)
-expect: PatternType=G2-S1-R, score=300
+expect: PatternType=G2-S1-HR, score=300  // 单开可下
 ```
 
 #### TC-14: G2-S2-R — 间隙二可下
@@ -1084,194 +1341,52 @@ expect: PatternType=G2-S2-R, score=30
 
 ### 9.3 Cross 测试
 
-#### TC-CROSS-01: CROSS-STRONG — CROSS-STRONG
+Cross 检测的核心：两条以上不同方向的线，其 extCell 集合有交集（交汇于同一可下空位）。
+
+#### TC-CROSS-01: CROSS-STRONG
 
 ```
-layout:
-  B(1,2,0), B(2,2,0)  → 水平 T2-OR
-  B(2,1,0), B(2,2,0)  → 垂直 T2-OR
-player=BLACK
+构造方法（程序化）:
+  1. 选择两条在棋盘上物理交叉的线:
+     Line A (对角线 1,1,0): (0,0,0)(1,1,0)(2,2,0)(3,3,0)
+     Line B (反对角线 -1,1,0): (3,1,0)(2,2,0)(1,3,0)(0,4,0)
+     交汇于 (2,2,0)
 
-水平线 (0,2,0)(1,2,0)(2,2,0)(3,2,0): B在(1,2)(2,2), extCells=[(0,2,0),(3,2,0)]
-垂直线 (2,0,0)(2,1,0)(2,2,0)(2,3,0): B在(2,1)(2,2), extCells=[(2,0,0),(2,3,0)]
+  2. 在 Line A 放置连续2子: B(1,1,0), B(2,2,0)
+     连续块在(1,1)-(2,2), extCells: (0,0,0)(3,3,0) → T2-OR
 
-叉子检测: 两条线共享棋子但 extCell 不同 — 没有共享空位
-→ 不形成叉子
+  3. 在 Line B 放置连续2子: B(3,1,0), B(2,2,0)
+     注意: Line B 方向 (-1,1,0), 连续块在(3,1)-(2,2), 
+     extCells: 一端出界, 另一端(1,3,0) → T2-HR
 
-修正布局 (extCell 重合):
-  B(0,2,0), B(1,2,0)  → 水平 T2-OR, extCells=[(-1,2)出界, (2,2,0)]
-  B(2,1,0), B(2,2,0)  → 垂直 T2-OR, extCells=[(2,0,0), (2,3,0)]
+  4. 两条线的 extCell 集合: {(0,0,0),(3,3,0)} ∩ {(1,3,0)} = ∅
+     → extCell 不重合 → 不形成 Cross（但共用了棋子位置）
 
-不对，还是不重合。
+  5. 正确的 CROSS-STRONG 构造需要 extCell 重合:
+     调整布局使两条线的 extCell 指向同一空位
+     具体构造留给测试实现时程序化完成
 
-正确布局 (交汇于空位):
-  B(1,2,0)             → 水平线 (1,2)→(4,2): 单独 B, extCells=[(0,2),(2,2)]
-  B(3,2,0)             → 同一水平线
-  + B(2,1,0)           → 垂直线 (2,1)→(2,4): B, extCells=[(2,0),(2,2)]
-
-  extCells 重合于 (2,2,0)! → CROSS-STRONG!
-
-layout (修正):
-  B(1,2,0), B(3,2,0)  → 水平线: position 0和2有B, 不连续!
-
-需要连续:
-  B(1,2,0), B(2,2,0)  → 水平连续2, extCells=[(0,2,0),(3,2,0)]
-  B(2,1,0)            → 垂直: (2,1)单独B, 需要另一个B形成连续...
-
-OK，这个需要更仔细。让我设计一个简单明确的叉子：
-
-layout (z=0):
-  B(1,2,0), B(2,2,0)  → Line A (水平1,0,0): 连续2, extCells=[(0,2,0),(3,2,0)]
-  B(2,3,0)            → Line B (垂直0,1,0): 在(2,2)和(2,3)
-
-垂直线 (2,1,0)(2,2,0)(2,3,0)(2,4,0): B在(2,2)(2,3), extCells=[(2,1,0),(2,4,0)]
-
-extCells: Line A → (0,2,0)(3,2,0); Line B → (2,1,0)(2,4,0)
-不重合 → NO CROSS
-
-正确叉子布局 (两条线共享空位):
-  B(1,1,0), B(2,1,0)  → 水平线: 连续2, extCells=[(0,1,0),(3,1,0)]
-  B(3,1,0), B(3,2,0)  → 垂直线: 连续2, extCells=[(3,0,0),(3,3,0)]
-
-  extCell (3,1,0) 被两条线共享?
-  水平线 extCells: (0,1,0)(3,1,0)
-  垂直线 extCells: (3,0,0)(3,3,0)
-  不重合
-
-终于，正确布局:
-  B(1,2,0), B(2,2,0)  → 水平线 through y=2: 连续2, extCells=[(0,2,0),(3,2,0)]
-  B(2,1,0), B(2,2,0)  → 这需要垂直线: (2,0)(2,1)(2,2)(2,3)
-
-垂直线 extCells: [(-1检查出界),(2,3,0)] 不对...
-垂直线 (2,-1,0)出界 → openEnds=1 (只有后端开放)
-
-需要垂直线也有2个开放端。在5x5棋盘上：
-垂直线 (2,0)(2,1)(2,2)(2,3):
-  B在(2,1)(2,2) → extCells: (2,0,0)(2,3,0)
-水平线 (0,2)(1,2)(2,2)(3,2):
-  B在(1,2)(2,2) → extCells: (0,2,0)(3,2,0)
-
-不重合。
-
-要重合: 水平线与垂直线共享extCell = (2,3,0) 需水平线也扩展到(2,3,0)
-但水平线 y=2 固定, (2,3,0) 的y=3. 不可能重合。
-
-叉子在同一个Z平面必须是同一位置。只有当我们构建不同维度的线时才能重合:
-
-fork 在 (2,2,0):
-  水平线 (1,0,0) 从(0,2)到(3,2): B在(1,2)(3,2), extCells包含(2,2) ✓
-  需要 B 在 (1,2) 和 (3,2) 连续吗？中间隔(2,2) → 不连续!
-
-所以同一平面内的"叉子"通常需要4条线交汇。让我简化:
-
-**正确叉子布局**（使用同一平面的 X 形对角线 + 水平线）:
-```
-layout (z=0):
-  B(1,1,0)  → 对角线(1,1,0): (1,1)(2,2)(3,3)(4,4)
-  B(3,1,0)  → 对角线(1,-1,0)? 不对
-
-简化: 使用水平+垂直，让他们的 extCell 碰巧重合:
-
-  B(2,3,0), B(3,3,0)  → 水平线 y=3: extCells=[(1,3,0),(4,3,0)]
-  B(3,2,0), B(3,3,0)  → 垂直线 x=3: extCells=[(3,1,0),(3,4,0)]
-
-不重合。
-
-算了，用最简单的叉子：同方向但不同位置的线交汇是不可能的。换种方式：
-
-叉子 = 两条不同方向的线都经过同一空位。在 5x5 z=0 平面:
-
-  Line A (对角线 1,1,0): (0,0)(1,1)(2,2)(3,3)
-  Line B (反对角线 1,-1,0): (0,4)(1,3)(2,2)(3,1)
-
-两者在 (2,2,0) 交叉。
-
-置 B(1,1,0), B(3,3,0)  → 对角线A: extCells=[(0,0,0),(2,2,0)]
-置 B(1,3,0), B(3,1,0)  → 反对角线B: extCells=[(0,4,0),(2,2,0)]
-
-(2,2,0) 重合！→ CROSS!
-
-但 B(1,1) 和 B(3,3) 连续吗？
-对角线 (0,0)(1,1)(2,2)(3,3): B在(1,1)(3,3), 中间(2,2)空
-→ 不连续! 这是两个独立的 B，中间隔空位。
-
-连续要求 B(1,1) 和 B(2,2) OR B(2,2) 和 B(3,3)。
-
-最终正确布局:
-layout (z=0):
-  B(1,1,0), B(2,2,0)  → 对角线(1,1,0): 连续2, extCells=[(0,0,0),(3,3,0)]
-  B(3,1,0), B(2,2,0)  → 对角线(-1,1,0)? 检查: (3,1)→(2,2)→(1,3)→(0,4)
-                       方向(-1,1,0), 连续2, extCells=[(1,3,0),(0,4,0)?出界]
-
-不对，方向(-1,1,0)在(2,2)的extCell往前是(1,3)，往后是(4,0)。跟(3,3)不重合。
-
-OK我放弃手动构造。这个测试用例用程序化方式说明即可。
-
-expect for CROSS-STRONG test:
-  CrossType=CROSS-STRONG, 两条 T2-O 交汇于同一空位
+验证: CrossDetector.detect() 在 extCell 重合场景下正确输出
+      CrossType=CROSS-STRONG, score=5000
 ```
 
-我意识到手动构造3D交叉cross太容易出错。让我在文档中只用简化的概念说明，测试用例用程序方式描述。
-
-### 9.3 (续) Cross 测试用例 — 程序化描述
-
-#### TC-CROSS-01: CROSS-STRONG — CROSS-STRONG
+#### TC-CROSS-02: CROSS-WIN
 
 ```
-构造方法:
-1. 在 z=0 平面选择两条交汇的线:
-   Line A (对角线 1,1,0): positions=[(0,0,0),(1,1,0),(2,2,0),(3,3,0)]
-   Line B (反对角线 -1,1,0): positions=[(3,1,0),(2,2,0),(1,3,0),(0,4,0)]
-   交汇点: (2,2,0) 是共享位置
+构造: 一条 T3-OR 的 extCell + 一条 T3-HR 的 extCell 重合
+验证: CrossType=CROSS-WIN, score=100000
+```
 
-2. 放置棋子使两条线各形成 T2-OR:
-   需要每线连续2子 + 两端开放
-
-   Line A: 置 B(1,1,0), B(2,2,0)
-     count=2连续, extCells: backward=(0,0,0), forward=(3,3,0)
-     两端 z=0 → READY → T2-OR
-
-   Line B: 置 B(3,1,0), B(2,2,0)
-     count=2连续, extCells: backward=(4,0,0)出界, forward=(1,3,0)
-     一端READY → 应为 T2-HR 而非 T2-OR
-
-3. 修正 Line B 需要两端开放:
-   改为:
-   Line B (水平 1,0,0): positions=[(1,1,0),(2,1,0),(3,1,0),(4,1,0)]
-   与 Line A 共享位置: (1,1,0)
-
-   置 B(1,1,0), B(2,1,0) → 水平, extCells=[(0,1,0),(3,1,0)]
-   置 B(1,1,0), B(2,2,0) → Line A 用 (1,1,0) 是不可行的... B(1,1,0)被重用了
-
-   问题是两线共享一个棋子位置而不是扩展点。
-
-叉子定义修正: 叉子 = 一子落下后同时扩展两条线。
-所以检测的是: 如果我在空位 P 落子，会有多少条线因此受益？
-
-对于TC-CROSS-01改:
-  置 B(0,0,0), B(1,1,0)  → 对角线(1,1,0): 连续2, extCells中 forward=(2,2,0)
-  置 B(4,0,0), B(3,1,0)  → 对角线(-1,1,0)?
-
-这太复杂了。我换个方式描述测试用例。
-
-#### TC-CROSS 测试 — 简化描述
+#### TC-CROSS-03: CROSS-WEAK
 
 ```
-TC-CROSS-01 (CROSS-STRONG):
-  构造: 两条不同方向的 T2-OR 线，其 extCell 集合的交集非空
-  验证: CrossDetector 正确识别交汇点和叉子类型
-  验证: CrossType=CROSS-STRONG, score=5000
-
-TC-CROSS-02 (CROSS-WIN):
-  构造: 一条 T3-O + 一条 T3-HR，extCell 交集非空
-  验证: CrossType=CROSS-WIN, score=100000
-
-TC-CROSS-03 (CROSS-WEAK):
-  构造: 两条 T2-HR，extCell 交集非空
-  验证: CrossType=CROSS-WEAK, score=300
+构造: 两条 T2-HR 的 extCell 交集非空
+验证: CrossType=CROSS-WEAK, score=300
 ```
 
 测试实现时用程序化方法：创建 Board → 手动放置棋子到指定位置 → 调用 CrossDetector.detect() → 验证结果。
+
+
 
 ### 9.4 完整局面评估测试
 
@@ -1320,11 +1435,11 @@ expect: finalScore 显著为负 (≈ -80000)
 
 ```
 layout: 布置一个需要2步才能形成的叉子
-  例如: 两条 T1-OR，如果AI在正确位置落子则成 T2-O×2 cross
-EASY (depth=1):
-  expect: AI 不会主动走向叉子点（看不到两步后）
-MEDIUM (depth=2):
-  expect: AI 选择走向叉子点的位置
+  例如: 两条 G2-S2，如果AI在正确位置落子则成 CROSS-STRONG
+EASY (depth=0, 纯评估):
+  expect: AI 不会主动走向叉子点（无搜索，看不到一步后形成的叉子）
+MEDIUM (depth=3, α-β):
+  expect: AI 选择走向叉子点的位置（能看穿 1.5 回合）
 ```
 
 #### TC-DIFF-02: HARD 安静搜索有效性
@@ -1348,8 +1463,9 @@ src/core/ai/
   ├── AIPlayerV2.ts          # AI决策门面
   ├── ThreatEvaluator.ts     # 威胁评估器
   ├── PatternMatcher.ts      # 棋形识别器
-  ├── CrossDetector.ts        # 叉子检测器
+  ├── CrossDetector.ts       # 叉子检测器
   ├── SearchEngine.ts        # 搜索引擎
+  ├── PonderingEngine.ts     # 预判计算(玩家回合后台运算)
   ├── scores.ts              # 分数常量定义
   └── __tests__/
        ├── PatternMatcher.test.ts
@@ -1392,8 +1508,8 @@ export type { Pattern, CrossResult, ThreatReport, SearchConfig, SearchResult };
 | 模块 | 用法 | 不改动 |
 |------|------|--------|
 | `LineIndex` | 预计算线、getAllLines、getPhysicalLineKey | 不改 |
-| `Board.clone()` | AI模拟 | 不改 |
-| `Board.setPiece()` | AI模拟放置/回溯 | 不改 |
+| `Board.setPiece()` + undo | AI模拟(放置/回溯，不clone) | 沿用 |
+| `Board.clone()` | 根节点快照（备用） | 不改 |
 | `Board.getPiece()` | 棋形检测查子 | 不改 |
 | `Board.getAvailableColumns()` | 候选生成 | 不改 |
 | `Board.checkWinWithIndex()` | 终止检测 | 不改 |
@@ -1423,7 +1539,7 @@ export type { Pattern, CrossResult, ThreatReport, SearchConfig, SearchResult };
 | 棋形识别 | 分散在 7 个函数中 | 统一 PatternMatcher |
 | 叉子检测 | Layer3 取 max + 0.05 抑制 | CrossDetector 按空位聚类 |
 | Readiness | Layer1/2 只用 openEnds | 所有棋形区分 R2/R1/R0 |
-| 方向权重 | 无（13方向等价） | PLANE 1.0 / SPATIAL 0.6 / VERTICAL 0.3 |
+| 方向权重 | 无（13方向等价） | PLANE 1.0 / SPATIAL 1.0 / VERTICAL 0.3 |
 | 分数体系 | 随意赋值 | 五子棋理论支撑 + 层级隔离 |
 | 搜索 | Minimax 耦合在 AIPlayer | 独立 SearchEngine，支持迭代加深/安静搜索 |
 | 难度区分 | 评估层开关 | 搜索深度 + 失误率（评估引擎始终完整） |
